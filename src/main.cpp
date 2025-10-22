@@ -1,6 +1,8 @@
-#include <print>
+#include "Renderer.h"
 
 int main() {
-  std::println("Hello, world!");
+  Renderer renderer;
+  renderer.init();
+  renderer.destroy();
   return 0;
 }
