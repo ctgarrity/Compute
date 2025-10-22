@@ -17,10 +17,12 @@ private:
   VkSurfaceKHR m_surface = VK_NULL_HANDLE;
   vkb::PhysicalDevice m_physical_device;
   vkb::Device m_device;
+  vkb::Swapchain m_swapchain;
 
   void create_instance();
   void init_sdl();
   void create_surface();
   void create_physical_device();
   void create_device();
+  void create_swapchain(vkb::Device device, vkb::Swapchain old_swapchain);
 };

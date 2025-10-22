@@ -17,10 +17,12 @@ void Renderer::init() {
   create_surface();
   create_physical_device();
   create_device();
+  create_swapchain(m_device, m_swapchain);
   std::println("Renderer initialized");
 }
 
 void Renderer::destroy() {
+  vkb::destroy_swapchain(m_swapchain);
   vkb::destroy_device(m_device);
   vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
   vkb::destroy_instance(m_instance);
@@ -146,4 +148,18 @@ void Renderer::create_device() {
   }
   m_device = dev_ret.value();
   std::println("Device created");
+}
+
+void Renderer::create_swapchain(vkb::Device device,
+                                vkb::Swapchain old_swapchain) {
+  vkb::SwapchainBuilder swapchain_builder{device};
+  auto swap_builder_ret = swapchain_builder.set_desired_min_image_count(3)
+                              .set_old_swapchain(old_swapchain)
+                              .build();
+
+  if (!swap_builder_ret) {
+    std::cerr << "Failed to create swapchain";
+  }
+  m_swapchain = swap_builder_ret.value();
+  std::println("Swapchain created");
 }
