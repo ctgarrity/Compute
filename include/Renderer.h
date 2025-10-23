@@ -11,18 +11,29 @@ public:
   void run();
 
 private:
-  vkb::Instance m_instance;
-  SDL_Window *m_window = nullptr;
-  std::vector<const char *> m_instance_extensions;
-  VkSurfaceKHR m_surface = VK_NULL_HANDLE;
-  vkb::PhysicalDevice m_physical_device;
-  vkb::Device m_device;
-  vkb::Swapchain m_swapchain;
+  struct Init {
+    vkb::Instance instance = {};
+    SDL_Window *window = nullptr;
+    VkExtent2D window_extent = {};
+    std::vector<const char *> instance_extensions;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    vkb::PhysicalDevice physical_device = {};
+    vkb::Device device = {};
+    vkb::Swapchain swapchain = {};
+  };
+
+  struct RenderData {
+    std::vector<VkImage> swapchain_images;
+    std::vector<VkImageView> swapchain_image_views;
+  };
+
+  Init m_init_data = {};
+  RenderData m_render_data = {};
 
   void create_instance();
   void init_sdl();
   void create_surface();
   void create_physical_device();
   void create_device();
-  void create_swapchain(vkb::Device device, vkb::Swapchain old_swapchain);
+  void create_swapchain(Init &init);
 };
