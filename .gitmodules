@@ -7,3 +7,6 @@
 [submodule "vendored/imgui"]
 	path = vendored/imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "vendored/vma"]
+	path = vendored/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

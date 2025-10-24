@@ -12,24 +12,22 @@
 #include <vulkan/vulkan_core.h>
 
 void Renderer::init() {
-  init_sdl();
-  create_instance();
-  create_surface();
-  create_physical_device();
-  create_device();
-  create_swapchain(m_init_data);
+  init_sdl(m_init_data);
+  create_instance(m_init_data);
+  create_surface(m_init_data);
+  create_physical_device(m_init_data);
+  create_device(m_init_data);
+  create_swapchain(m_init_data, m_render_data);
+  init_vma(m_init_data);
   std::println("Renderer initialized");
 }
 
 void Renderer::destroy() {
+  vkDeviceWaitIdle(m_init_data.device);
   m_init_data.swapchain.destroy_image_views(
       m_render_data.swapchain_image_views);
   vkb::destroy_swapchain(m_init_data.swapchain);
-  vkb::destroy_device(m_init_data.device);
-  vkDestroySurfaceKHR(m_init_data.instance, m_init_data.surface, nullptr);
-  vkb::destroy_instance(m_init_data.instance);
-  SDL_DestroyWindow(m_init_data.window);
-  SDL_Quit();
+  m_deletion_queue.flush();
   std::println("Renderer destroyed");
 }
 
@@ -52,36 +50,46 @@ void Renderer::run() {
   }
 }
 
-void Renderer::init_sdl() {
+void Renderer::init_sdl(InitData &init) {
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-    std::cerr << "Error: SDL_Init(): " << SDL_GetError() << std::endl;
+    std::cerr << "Error: SDL_InitData(): " << SDL_GetError() << std::endl;
   }
+
+  m_deletion_queue.push_function([]() { SDL_Quit(); });
 
   // Create window with Vulkan graphics context
   float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   SDL_WindowFlags window_flags =
       SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-  m_init_data.window =
-      SDL_CreateWindow("Vulkan Compute", (int)(1280 * main_scale),
-                       (int)(800 * main_scale), window_flags);
-  if (m_init_data.window == nullptr) {
+  init.window = SDL_CreateWindow("Vulkan Compute", (int)(1280 * main_scale),
+                                 (int)(800 * main_scale), window_flags);
+  if (init.window == nullptr) {
     std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
   }
+
+  m_deletion_queue.push_function([init]() { SDL_DestroyWindow(init.window); });
 
   std::println("SDL initialized");
 }
 
-void Renderer::create_instance() {
+void Renderer::create_instance(InitData &init) {
+  auto system_info_ret = vkb::SystemInfo::get_system_info();
+  if (!system_info_ret) {
+    std::cerr << system_info_ret.error().message() << std::endl;
+  }
+  auto system_info = system_info_ret.value();
+  std::println("Instance API: {}", system_info.instance_api_version);
+
   uint32_t extension_count = 0;
   const char *const *extensions =
       SDL_Vulkan_GetInstanceExtensions(&extension_count);
   for (uint32_t i = 0; i < extension_count; i++) {
-    m_init_data.instance_extensions.push_back(extensions[i]);
+    init.instance_extensions.push_back(extensions[i]);
   }
-  m_init_data.instance_extensions.push_back(
+  init.instance_extensions.push_back(
       VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME); // From
                                                                // Vulkan-Samples
-  m_init_data.instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  init.instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
   vkb::InstanceBuilder instance_builder;
   auto instance_builder_return =
@@ -98,24 +106,30 @@ void Renderer::create_instance() {
               << instance_builder_return.error().message() << std::endl;
   }
 
-  m_init_data.instance = instance_builder_return.value();
+  init.instance = instance_builder_return.value();
   std::println("Instance created");
+
+  m_deletion_queue.push_function(
+      [init]() { vkb::destroy_instance(init.instance); });
 }
 
-void Renderer::create_surface() {
-  if (!SDL_Vulkan_CreateSurface(m_init_data.window, m_init_data.instance,
-                                nullptr, &m_init_data.surface)) {
+void Renderer::create_surface(InitData &init) {
+  if (!SDL_Vulkan_CreateSurface(init.window, init.instance, nullptr,
+                                &init.surface)) {
     std::cerr << "Error: SDL_Vulkan_CreateSurface(): " << SDL_GetError()
               << std::endl;
   }
   std::println("Surface created");
+
+  m_deletion_queue.push_function([init]() {
+    SDL_Vulkan_DestroySurface(init.instance, init.surface, nullptr);
+  });
 }
 
-void Renderer::create_physical_device() {
-  vkb::PhysicalDeviceSelector selector{m_init_data.instance};
-  auto phys_ret = selector.set_surface(m_init_data.surface)
-                      .prefer_gpu_device_type()
-                      .select();
+void Renderer::create_physical_device(InitData &init) {
+  vkb::PhysicalDeviceSelector selector{init.instance};
+  auto phys_ret =
+      selector.set_surface(init.surface).prefer_gpu_device_type().select();
   if (!phys_ret) {
     std::cerr << "Failed to select Vulkan Physical Device. Error: "
               << phys_ret.error().message() << "\n";
@@ -139,23 +153,26 @@ void Renderer::create_physical_device() {
     std::cerr << "One or more device extensions not supported!" << std::endl;
   }
 
-  m_init_data.physical_device = phys_ret.value();
+  init.physical_device = phys_ret.value();
   std::println("Physical device created");
 }
 
-void Renderer::create_device() {
-  vkb::DeviceBuilder device_builder{m_init_data.physical_device};
+void Renderer::create_device(InitData &init) {
+  vkb::DeviceBuilder device_builder{init.physical_device};
   // automatically propagate needed data from instance & physical device
   auto dev_ret = device_builder.build();
   if (!dev_ret) {
     std::cerr << "Failed to create Vulkan device. Error: "
               << dev_ret.error().message() << std::endl;
   }
-  m_init_data.device = dev_ret.value();
+  init.device = dev_ret.value();
   std::println("Device created");
+
+  m_deletion_queue.push_function(
+      [init]() { vkb::destroy_device(init.device); });
 }
 
-void Renderer::create_swapchain(Init &init) {
+void Renderer::create_swapchain(InitData &init, RenderData &render) {
   vkb::SwapchainBuilder swapchain_builder{init.device};
   auto swap_builder_ret =
       swapchain_builder.set_desired_min_image_count(3)
@@ -169,8 +186,27 @@ void Renderer::create_swapchain(Init &init) {
 
   vkb::destroy_swapchain(init.swapchain);
   init.swapchain = swap_builder_ret.value();
-  m_render_data.swapchain_images = init.swapchain.get_images().value();
-  m_render_data.swapchain_image_views =
-      init.swapchain.get_image_views().value();
+  render.swapchain_images = init.swapchain.get_images().value();
+  render.swapchain_image_views = init.swapchain.get_image_views().value();
   std::println("Swapchain created");
+}
+
+void Renderer::init_vma(InitData &init) {
+  auto system_info_ret = vkb::SystemInfo::get_system_info();
+  if (!system_info_ret) {
+    std::cerr << system_info_ret.error().message() << std::endl;
+  }
+  auto system_info = system_info_ret.value();
+
+  VmaAllocatorCreateInfo alloc_info = {};
+  alloc_info.instance = init.instance;
+  alloc_info.physicalDevice = init.physical_device;
+  alloc_info.device = init.device;
+  alloc_info.vulkanApiVersion = system_info.instance_api_version;
+  alloc_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+  vmaCreateAllocator(&alloc_info, &init.allocator);
+
+  std::println("Vma allocator created");
+  m_deletion_queue.push_function(
+      [init]() { vmaDestroyAllocator(init.allocator); });
 }
