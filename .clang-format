@@ -1,0 +1,55 @@
+BasedOnStyle: Microsoft
+
+# === Line Length & Whitespace ===
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120                    # Wider lines for modern C++
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+# === Braces & Layout ===
+BreakBeforeBraces: Allman           # Matches Microsoft and common engine style
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: true
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeElse: true
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+# === Spaces ===
+SpaceBeforeParens: ControlStatements
+SpaceAfterTemplateKeyword: true
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+SpaceInEmptyParentheses: false
+Cpp11BracedListStyle: false         # Prevents extra spaces in initializer lists
+
+# === Includes ===
+SortIncludes: false                 # Engine and game code often need manual include order
+IncludeBlocks: Preserve             # Do not reorder include blocks
+
+# === Pointers & References ===
+PointerAlignment: Left              # int* ptr vs int *ptr → left is more common in MS style
+ReferenceAlignment: Left
+
+# === Indentation Behavior ===
+NamespaceIndentation: All           # Indent inside namespaces (cleaner for engines)
+AccessModifierOffset: -4            # Align public/private with class (Microsoft style)
+
+# === Templates & Lambdas ===
+BreakBeforeBinaryOperators: None    # Keep expressions compact
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackParameters: false
+BinPackArguments: false
+
+# === Comments ===
+AlignTrailingComments: true
+

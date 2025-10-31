@@ -8,66 +8,74 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
-class Renderer {
-  struct InitData {
-    vkb::Instance instance = {};
-    SDL_Window *window = nullptr;
-    VkExtent2D window_extent = {};
-    std::vector<const char *> instance_extensions;
-    VkSurfaceKHR surface = VK_NULL_HANDLE;
-    vkb::PhysicalDevice physical_device = {};
-    vkb::Device device = {};
-    vkb::Swapchain swapchain = {};
-    VmaAllocator allocator = {};
-  };
+class Renderer
+{
+    struct InitData
+    {
+        vkb::Instance instance = {};
+        SDL_Window* window = nullptr;
+        VkExtent2D window_extent = {};
+        std::vector<const char*> instance_extensions;
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        vkb::PhysicalDevice physical_device = {};
+        vkb::Device device = {};
+        vkb::Swapchain swapchain = {};
+        VmaAllocator allocator = {};
+    };
 
-  struct AllocatedImage {
-    VkImage image;
-    VkImageView image_view;
-    VmaAllocation allocation;
-    VkExtent3D image_extent;
-    VkFormat image_format;
-  };
+    struct AllocatedImage
+    {
+        VkImage image;
+        VkImageView image_view;
+        VmaAllocation allocation;
+        VkExtent3D image_extent;
+        VkFormat image_format;
+    };
 
-  struct RenderData {
-    std::vector<VkImage> swapchain_images;
-    std::vector<VkImageView> swapchain_image_views;
-    AllocatedImage draw_image;
-  };
+    struct RenderData
+    {
+        std::vector<VkImage> swapchain_images;
+        std::vector<VkImageView> swapchain_image_views;
+        AllocatedImage draw_image;
+    };
 
-  struct DeletionQueue {
-  private:
-    std::deque<std::function<void()>> queue;
+    struct DeletionQueue
+    {
+    private:
+        std::deque<std::function<void()>> queue;
 
-  public:
-    void flush() {
-      for (const std::function<void()> &func : std::views::reverse(queue)) {
-        func();
-      }
-      queue.clear();
-    }
+    public:
+        void flush()
+        {
+            for (const std::function<void()>& func : std::views::reverse(queue))
+            {
+                func();
+            }
+            queue.clear();
+        }
 
-    void push_function(std::function<void()> &&func) {
-      queue.push_back(std::move(func));
-    }
-  };
+        void push_function(std::function<void()>&& func)
+        {
+            queue.push_back(std::move(func));
+        }
+    };
 
 public:
-  void init();
-  void destroy();
-  void run();
+    void init();
+    void destroy();
+    void run();
 
 private:
-  InitData m_init_data = {};
-  RenderData m_render_data = {};
-  DeletionQueue m_deletion_queue;
+    InitData m_init_data = {};
+    RenderData m_render_data = {};
+    DeletionQueue m_deletion_queue;
 
-  void create_instance(InitData &init);
-  void init_sdl(InitData &init);
-  void create_surface(InitData &init);
-  void create_physical_device(InitData &init);
-  void create_device(InitData &init);
-  void create_swapchain(InitData &init, RenderData &render);
-  void init_vma(InitData &init);
-  void create_draw_image(InitData &init, RenderData &render);
+    void create_instance(InitData& init);
+    void init_sdl(InitData& init);
+    void create_surface(InitData& init);
+    void create_physical_device(InitData& init);
+    void create_device(InitData& init);
+    void create_swapchain(InitData& init, RenderData& render);
+    void init_vma(InitData& init);
+    void create_draw_image(InitData& init, RenderData& render);
 };
