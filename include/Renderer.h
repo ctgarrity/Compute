@@ -1,12 +1,13 @@
 #pragma once
+#include <vulkan/vulkan_core.h>
 #include "SDL3/SDL_video.h"
 #include "VkBootstrap.h"
 #include "vk_mem_alloc.h"
+
 #include <deque>
 #include <functional>
 #include <ranges>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 class Renderer
 {

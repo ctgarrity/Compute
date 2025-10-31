@@ -4,12 +4,12 @@
 #include <iostream>
 #include <print>
 
+#include <vulkan/vulkan_core.h>
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "SDL3/SDL_video.h"
 #include "SDL3/SDL_vulkan.h"
 #include "VkBootstrap.h"
-#include <vulkan/vulkan_core.h>
 
 void Renderer::init()
 {
