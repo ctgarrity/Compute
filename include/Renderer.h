@@ -21,9 +21,18 @@ class Renderer {
     VmaAllocator allocator = {};
   };
 
+  struct AllocatedImage {
+    VkImage image;
+    VkImageView image_view;
+    VmaAllocation allocation;
+    VkExtent3D image_extent;
+    VkFormat image_format;
+  };
+
   struct RenderData {
     std::vector<VkImage> swapchain_images;
     std::vector<VkImageView> swapchain_image_views;
+    AllocatedImage draw_image;
   };
 
   struct DeletionQueue {
@@ -60,4 +69,5 @@ private:
   void create_device(InitData &init);
   void create_swapchain(InitData &init, RenderData &render);
   void init_vma(InitData &init);
+  void create_draw_image(InitData &init, RenderData &render);
 };

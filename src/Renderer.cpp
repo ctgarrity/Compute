@@ -61,8 +61,10 @@ void Renderer::init_sdl(InitData &init) {
   float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   SDL_WindowFlags window_flags =
       SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-  init.window = SDL_CreateWindow("Vulkan Compute", (int)(1280 * main_scale),
-                                 (int)(800 * main_scale), window_flags);
+  init.window_extent = {1280, 800};
+  init.window = SDL_CreateWindow(
+      "Vulkan Compute", (int)(init.window_extent.width * main_scale),
+      (int)(init.window_extent.height * main_scale), window_flags);
   if (init.window == nullptr) {
     std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
   }
@@ -177,7 +179,9 @@ void Renderer::create_swapchain(InitData &init, RenderData &render) {
   auto swap_builder_ret =
       swapchain_builder.set_desired_min_image_count(3)
           .set_old_swapchain(init.swapchain)
-          //.set_desired_extent(uint32_t width, uint32_t height)
+          .set_desired_extent(init.window_extent.width,
+                              init.window_extent.height)
+          .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
           .build();
 
   if (!swap_builder_ret) {
@@ -209,4 +213,42 @@ void Renderer::init_vma(InitData &init) {
   std::println("Vma allocator created");
   m_deletion_queue.push_function(
       [init]() { vmaDestroyAllocator(init.allocator); });
+}
+
+void Renderer::create_draw_image(InitData &init, RenderData &render) {
+  VkExtent3D draw_image_extent = {init.swapchain.extent.width,
+                                  init.window_extent.height, 1};
+
+  VkImageUsageFlags image_usage = {};
+  image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  image_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  image_usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+  image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+  VkImageCreateInfo image_info = {};
+  image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_info.pNext = nullptr;
+  image_info.imageType = VK_IMAGE_TYPE_2D;
+  image_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+  image_info.extent = draw_image_extent;
+  image_info.usage = image_usage;
+
+  VmaAllocationCreateInfo alloc_info = {};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+  vmaCreateImage(init.allocator, &image_info, &alloc_info,
+                 &render.draw_image.image, &render.draw_image.allocation,
+                 nullptr);
+
+  m_deletion_queue.push_function([init, render]() {
+    vmaDestroyImage(init.allocator, render.draw_image.image,
+                    render.draw_image.allocation);
+  });
+
+  VkImageViewCreateInfo image_view_info = {};
+  image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  image_view_info.pNext = nullptr;
+  image_view_info.image = render.draw_image.image;
+  image_view_info.format = render.draw_image.image_format;
 }
