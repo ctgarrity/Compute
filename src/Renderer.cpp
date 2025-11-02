@@ -20,14 +20,20 @@ void Renderer::init()
     create_device(m_init_data);
     create_swapchain(m_init_data, m_render_data);
     init_vma(m_init_data);
+    create_draw_image(m_init_data, m_render_data);
+    create_command_buffers(m_init_data, m_render_data);
     std::println("Renderer initialized");
 }
 
 void Renderer::destroy()
 {
-    vkDeviceWaitIdle(m_init_data.device);
+    VK_CHECK(vkDeviceWaitIdle(m_init_data.device));
     m_init_data.swapchain.destroy_image_views(m_render_data.swapchain_image_views);
     vkb::destroy_swapchain(m_init_data.swapchain);
+    for (auto& frame : m_render_data.frame_data)
+    {
+        frame.deletion_queue.flush();
+    }
     m_deletion_queue.flush();
     std::println("Renderer destroyed");
 }
@@ -216,7 +222,7 @@ void Renderer::init_vma(InitData& init)
     alloc_info.device = init.device;
     alloc_info.vulkanApiVersion = system_info.instance_api_version;
     alloc_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-    vmaCreateAllocator(&alloc_info, &init.allocator);
+    VK_CHECK(vmaCreateAllocator(&alloc_info, &init.allocator));
 
     std::println("Vma allocator created");
     m_deletion_queue.push_function([init]() { vmaDestroyAllocator(init.allocator); });
@@ -225,6 +231,8 @@ void Renderer::init_vma(InitData& init)
 void Renderer::create_draw_image(InitData& init, RenderData& render)
 {
     VkExtent3D draw_image_extent = { init.swapchain.extent.width, init.window_extent.height, 1 };
+    render.draw_image.image_extent = draw_image_extent;
+    render.draw_image.image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     VkImageUsageFlags image_usage = {};
     image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -236,17 +244,20 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.pNext = nullptr;
     image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    image_info.extent = draw_image_extent;
+    image_info.format = render.draw_image.image_format;
+    image_info.extent = render.draw_image.image_extent;
     image_info.usage = image_usage;
+    image_info.arrayLayers = 1;
+    image_info.mipLevels = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
 
     VmaAllocationCreateInfo alloc_info = {};
     alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
     alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    vmaCreateImage(
-        init.allocator, &image_info, &alloc_info, &render.draw_image.image, &render.draw_image.allocation, nullptr);
-
+    VK_CHECK(vmaCreateImage(
+        init.allocator, &image_info, &alloc_info, &render.draw_image.image, &render.draw_image.allocation, nullptr))
     m_deletion_queue.push_function(
         [init, render]() { vmaDestroyImage(init.allocator, render.draw_image.image, render.draw_image.allocation); });
 
@@ -255,4 +266,43 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     image_view_info.pNext = nullptr;
     image_view_info.image = render.draw_image.image;
     image_view_info.format = render.draw_image.image_format;
+    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    image_view_info.subresourceRange.baseMipLevel = 0;
+    image_view_info.subresourceRange.levelCount = 1;
+    image_view_info.subresourceRange.baseArrayLayer = 0;
+    image_view_info.subresourceRange.layerCount = 1;
+    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    VK_CHECK(vkCreateImageView(init.device, &image_view_info, nullptr, &render.draw_image.image_view));
+    m_deletion_queue.push_function([init, render]()
+                                   { vkDestroyImageView(init.device, render.draw_image.image_view, nullptr); });
+
+    std::println("Draw image created\n\twidth: {}\n\theigth: {}",
+                 render.draw_image.image_extent.width,
+                 render.draw_image.image_extent.height);
+}
+
+void Renderer::create_command_buffers(InitData& init, RenderData& render)
+{
+    VkCommandPoolCreateInfo command_info = {};
+    command_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    command_info.pNext = nullptr;
+    command_info.queueFamilyIndex = init.device.get_queue_index(vkb::QueueType::graphics).value();
+    command_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+    for (auto& frame : render.frame_data)
+    {
+        VK_CHECK(vkCreateCommandPool(init.device, &command_info, nullptr, &frame.command_pool));
+        frame.deletion_queue.push_function([init, frame]()
+                                           { vkDestroyCommandPool(init.device, frame.command_pool, nullptr); });
+
+        VkCommandBufferAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.pNext = nullptr;
+        alloc_info.commandPool = frame.command_pool;
+        alloc_info.commandBufferCount = 1;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+        VK_CHECK(vkAllocateCommandBuffers(init.device, &alloc_info, &frame.command_buffer));
+    }
 }

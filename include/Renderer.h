@@ -1,5 +1,6 @@
 #pragma once
 #include <vulkan/vulkan_core.h>
+#include "vulkan/vk_enum_string_helper.h"
 #include "SDL3/SDL_video.h"
 #include "VkBootstrap.h"
 #include "vk_mem_alloc.h"
@@ -8,9 +9,23 @@
 #include <functional>
 #include <ranges>
 #include <vector>
+#include <array>
+
+#define VK_CHECK(func)                                                                                                 \
+    {                                                                                                                  \
+        const VkResult result = func;                                                                                  \
+        if (result != VK_SUCCESS)                                                                                      \
+        {                                                                                                              \
+            std::cerr << "Error calling function " << #func << "at " << __FILE__ << ":" << __LINE__ << ". Result is "  \
+                      << string_VkResult(result) << std::endl;                                                         \
+            assert(false);                                                                                             \
+        }                                                                                                              \
+    }
 
 class Renderer
 {
+    static constexpr unsigned int FRAMES_IN_FLIGHT = 2;
+
     struct InitData
     {
         vkb::Instance instance = {};
@@ -31,13 +46,6 @@ class Renderer
         VmaAllocation allocation;
         VkExtent3D image_extent;
         VkFormat image_format;
-    };
-
-    struct RenderData
-    {
-        std::vector<VkImage> swapchain_images;
-        std::vector<VkImageView> swapchain_image_views;
-        AllocatedImage draw_image;
     };
 
     struct DeletionQueue
@@ -61,6 +69,25 @@ class Renderer
         }
     };
 
+    struct FrameData
+    {
+        DeletionQueue deletion_queue;
+
+        VkCommandPool command_pool;
+        VkCommandBuffer command_buffer;
+
+        VkSemaphore acquire_semaphore;
+        VkFence render_fence;
+    };
+
+    struct RenderData
+    {
+        std::vector<VkImage> swapchain_images;
+        std::vector<VkImageView> swapchain_image_views;
+        AllocatedImage draw_image;
+        std::array<FrameData, FRAMES_IN_FLIGHT> frame_data;
+    };
+
 public:
     void init();
     void destroy();
@@ -79,4 +106,5 @@ private:
     void create_swapchain(InitData& init, RenderData& render);
     void init_vma(InitData& init);
     void create_draw_image(InitData& init, RenderData& render);
+    void create_command_buffers(InitData& init, RenderData& render);
 };
