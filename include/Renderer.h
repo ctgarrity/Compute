@@ -86,6 +86,7 @@ class Renderer
         std::vector<VkImageView> swapchain_image_views;
         AllocatedImage draw_image;
         std::array<FrameData, FRAMES_IN_FLIGHT> frame_data;
+        std::vector<VkDescriptorSetLayoutBinding> descriptor_layout_bindings;
     };
 
 public:
@@ -107,4 +108,5 @@ private:
     void init_vma(InitData& init);
     void create_draw_image(InitData& init, RenderData& render);
     void create_command_buffers(InitData& init, RenderData& render);
+    void create_descriptors(RenderData& render);
 };

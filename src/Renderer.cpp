@@ -306,3 +306,20 @@ void Renderer::create_command_buffers(InitData& init, RenderData& render)
         VK_CHECK(vkAllocateCommandBuffers(init.device, &alloc_info, &frame.command_buffer));
     }
 }
+
+void Renderer::create_descriptors(RenderData& render)
+{
+    VkDescriptorSetLayoutBinding layout_binding = {};
+    layout_binding.binding = 0;
+    layout_binding.descriptorCount = 1;
+    layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    layout_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    layout_binding.pImmutableSamplers = nullptr;
+    render.descriptor_layout_bindings.push_back(layout_binding);
+
+    VkDescriptorSetLayoutCreateInfo layout_info = {};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.pNext = nullptr;
+    layout_info.bindingCount = (uint32_t)render.descriptor_layout_bindings.size();
+    layout_info.pBindings = render.descriptor_layout_bindings.data();
+}
