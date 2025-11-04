@@ -20,6 +20,7 @@ void Renderer::init()
     create_device(m_init_data);
     create_swapchain(m_init_data, m_render_data);
     init_vma(m_init_data);
+    init_descriptors(m_init_data, m_render_data);
     create_draw_image(m_init_data, m_render_data);
     create_command_buffers(m_init_data, m_render_data);
     std::println("Renderer initialized");
@@ -280,6 +281,14 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     std::println("Draw image created\n\twidth: {}\n\theigth: {}",
                  render.draw_image.image_extent.width,
                  render.draw_image.image_extent.height);
+
+    VkDescriptorSetAllocateInfo descriptor_alloc_info = {};
+    descriptor_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_alloc_info.pNext = nullptr;
+    descriptor_alloc_info.descriptorPool = render.descriptor_pool;
+    descriptor_alloc_info.descriptorSetCount = 1;
+    descriptor_alloc_info.pSetLayouts = &render.descriptor_layout;
+    VK_CHECK(vkAllocateDescriptorSets(init.device, &descriptor_alloc_info, &render.descriptor_set));
 }
 
 void Renderer::create_command_buffers(InitData& init, RenderData& render)
@@ -305,9 +314,10 @@ void Renderer::create_command_buffers(InitData& init, RenderData& render)
 
         VK_CHECK(vkAllocateCommandBuffers(init.device, &alloc_info, &frame.command_buffer));
     }
+    std::println("Command buffers created");
 }
 
-void Renderer::create_descriptors(RenderData& render)
+void Renderer::init_descriptors(InitData& init, RenderData& render)
 {
     VkDescriptorSetLayoutBinding layout_binding = {};
     layout_binding.binding = 0;
@@ -315,11 +325,29 @@ void Renderer::create_descriptors(RenderData& render)
     layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     layout_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     layout_binding.pImmutableSamplers = nullptr;
-    render.descriptor_layout_bindings.push_back(layout_binding);
+
+    std::vector<VkDescriptorSetLayoutBinding> descriptor_layout_bindings;
+    descriptor_layout_bindings.push_back(layout_binding);
 
     VkDescriptorSetLayoutCreateInfo layout_info = {};
     layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layout_info.pNext = nullptr;
-    layout_info.bindingCount = (uint32_t)render.descriptor_layout_bindings.size();
-    layout_info.pBindings = render.descriptor_layout_bindings.data();
+    layout_info.bindingCount = (uint32_t)descriptor_layout_bindings.size();
+    layout_info.pBindings = descriptor_layout_bindings.data();
+    vkCreateDescriptorSetLayout(init.device, &layout_info, nullptr, &render.descriptor_layout);
+    m_deletion_queue.push_function([init, render]()
+                                   { vkDestroyDescriptorSetLayout(init.device, render.descriptor_layout, nullptr); });
+
+    std::vector<VkDescriptorPoolSize> pool_sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 } };
+
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.pNext = nullptr;
+    pool_info.pPoolSizes = pool_sizes.data();
+    pool_info.poolSizeCount = (uint32_t)pool_sizes.size();
+    pool_info.maxSets = 1;
+    VK_CHECK(vkCreateDescriptorPool(init.device, &pool_info, nullptr, &render.descriptor_pool));
+    m_deletion_queue.push_function([init, render]()
+                                   { vkDestroyDescriptorPool(init.device, render.descriptor_pool, nullptr); });
+    std::println("Descriptors initialized");
 }
