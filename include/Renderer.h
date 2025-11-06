@@ -86,6 +86,7 @@ class Renderer
         std::vector<VkImageView> swapchain_image_views;
         AllocatedImage draw_image;
         std::array<FrameData, FRAMES_IN_FLIGHT> frame_data;
+        std::vector<VkSemaphore> submit_semaphores;
         VkDescriptorSetLayout descriptor_layout;
         VkDescriptorPool descriptor_pool;
         VkDescriptorSet descriptor_set;
@@ -97,18 +98,19 @@ public:
     void run();
 
 private:
-    InitData m_init_data = {};
-    RenderData m_render_data = {};
+    InitData m_init_data;
+    RenderData m_render_data;
     DeletionQueue m_deletion_queue;
 
-    void create_instance(InitData& init);
-    void init_sdl(InitData& init);
-    void create_surface(InitData& init);
-    void create_physical_device(InitData& init);
-    void create_device(InitData& init);
-    void create_swapchain(InitData& init, RenderData& render);
-    void init_vma(InitData& init);
-    void create_draw_image(InitData& init, RenderData& render);
-    void create_command_buffers(InitData& init, RenderData& render);
-    void init_descriptors(InitData& init, RenderData& render);
+    void create_instance();
+    void init_sdl();
+    void create_surface();
+    void create_physical_device();
+    void create_device();
+    void create_swapchain();
+    void init_vma();
+    void create_draw_image();
+    void create_command_buffers();
+    void init_descriptors();
+    void init_sync_structures();
 };

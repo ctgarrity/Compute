@@ -13,16 +13,17 @@
 
 void Renderer::init()
 {
-    init_sdl(m_init_data);
-    create_instance(m_init_data);
-    create_surface(m_init_data);
-    create_physical_device(m_init_data);
-    create_device(m_init_data);
-    create_swapchain(m_init_data, m_render_data);
-    init_vma(m_init_data);
-    init_descriptors(m_init_data, m_render_data);
-    create_draw_image(m_init_data, m_render_data);
-    create_command_buffers(m_init_data, m_render_data);
+    init_sdl();
+    create_instance();
+    create_surface();
+    create_physical_device();
+    create_device();
+    create_swapchain();
+    init_vma();
+    init_descriptors();
+    create_draw_image();
+    create_command_buffers();
+    init_sync_structures();
     std::println("Renderer initialized");
 }
 
@@ -62,7 +63,7 @@ void Renderer::run()
     }
 }
 
-void Renderer::init_sdl(InitData& init)
+void Renderer::init_sdl()
 {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     {
@@ -73,22 +74,22 @@ void Renderer::init_sdl(InitData& init)
     // Create window with Vulkan graphics context
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    init.window_extent = { 1280, 800 };
-    init.window = SDL_CreateWindow("Vulkan Compute",
-                                   (int)(init.window_extent.width * main_scale),
-                                   (int)(init.window_extent.height * main_scale),
-                                   window_flags);
-    if (init.window == nullptr)
+    m_init_data.window_extent = { 1280, 800 };
+    m_init_data.window = SDL_CreateWindow("Vulkan Compute",
+                                          (int)(m_init_data.window_extent.width * main_scale),
+                                          (int)(m_init_data.window_extent.height * main_scale),
+                                          window_flags);
+    if (!m_init_data.window)
     {
         std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
     }
 
-    m_deletion_queue.push_function([init]() { SDL_DestroyWindow(init.window); });
+    m_deletion_queue.push_function([this]() { SDL_DestroyWindow(m_init_data.window); });
 
     std::println("SDL initialized");
 }
 
-void Renderer::create_instance(InitData& init)
+void Renderer::create_instance()
 {
     auto system_info_ret = vkb::SystemInfo::get_system_info();
     if (!system_info_ret)
@@ -102,10 +103,11 @@ void Renderer::create_instance(InitData& init)
     const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
     for (uint32_t i = 0; i < extension_count; i++)
     {
-        init.instance_extensions.push_back(extensions[i]);
+        m_init_data.instance_extensions.push_back(extensions[i]);
     }
-    init.instance_extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME); // From Vulkan-Samples
-    init.instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+    m_init_data.instance_extensions.push_back(
+        VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME); // From Vulkan-Samples
+    m_init_data.instance_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 
     vkb::InstanceBuilder instance_builder;
     auto instance_builder_return = instance_builder.set_app_name("Compute Shader Playground")
@@ -121,27 +123,28 @@ void Renderer::create_instance(InitData& init)
         std::cerr << "Failed to create vkb instance: " << instance_builder_return.error().message() << std::endl;
     }
 
-    init.instance = instance_builder_return.value();
+    m_init_data.instance = instance_builder_return.value();
     std::println("Instance created");
 
-    m_deletion_queue.push_function([init]() { vkb::destroy_instance(init.instance); });
+    m_deletion_queue.push_function([this]() { vkb::destroy_instance(m_init_data.instance); });
 }
 
-void Renderer::create_surface(InitData& init)
+void Renderer::create_surface()
 {
-    if (!SDL_Vulkan_CreateSurface(init.window, init.instance, nullptr, &init.surface))
+    if (!SDL_Vulkan_CreateSurface(m_init_data.window, m_init_data.instance, nullptr, &m_init_data.surface))
     {
         std::cerr << "Error: SDL_Vulkan_CreateSurface(): " << SDL_GetError() << std::endl;
     }
     std::println("Surface created");
 
-    m_deletion_queue.push_function([init]() { SDL_Vulkan_DestroySurface(init.instance, init.surface, nullptr); });
+    m_deletion_queue.push_function([this]()
+                                   { SDL_Vulkan_DestroySurface(m_init_data.instance, m_init_data.surface, nullptr); });
 }
 
-void Renderer::create_physical_device(InitData& init)
+void Renderer::create_physical_device()
 {
-    vkb::PhysicalDeviceSelector selector{ init.instance };
-    auto phys_ret = selector.set_surface(init.surface).prefer_gpu_device_type().select();
+    vkb::PhysicalDeviceSelector selector{ m_init_data.instance };
+    auto phys_ret = selector.set_surface(m_init_data.surface).prefer_gpu_device_type().select();
     if (!phys_ret)
     {
         std::cerr << "Failed to select Vulkan Physical Device. Error: " << phys_ret.error().message() << "\n";
@@ -168,31 +171,31 @@ void Renderer::create_physical_device(InitData& init)
         std::cerr << "One or more device extensions not supported!" << std::endl;
     }
 
-    init.physical_device = phys_ret.value();
+    m_init_data.physical_device = phys_ret.value();
     std::println("Physical device created");
 }
 
-void Renderer::create_device(InitData& init)
+void Renderer::create_device()
 {
-    vkb::DeviceBuilder device_builder{ init.physical_device };
+    vkb::DeviceBuilder device_builder{ m_init_data.physical_device };
     // automatically propagate needed data from instance & physical device
     auto dev_ret = device_builder.build();
     if (!dev_ret)
     {
         std::cerr << "Failed to create Vulkan device. Error: " << dev_ret.error().message() << std::endl;
     }
-    init.device = dev_ret.value();
+    m_init_data.device = dev_ret.value();
     std::println("Device created");
 
-    m_deletion_queue.push_function([init]() { vkb::destroy_device(init.device); });
+    m_deletion_queue.push_function([this]() { vkb::destroy_device(m_init_data.device); });
 }
 
-void Renderer::create_swapchain(InitData& init, RenderData& render)
+void Renderer::create_swapchain()
 {
-    vkb::SwapchainBuilder swapchain_builder{ init.device };
+    vkb::SwapchainBuilder swapchain_builder{ m_init_data.device };
     auto swap_builder_ret = swapchain_builder.set_desired_min_image_count(3)
-                                .set_old_swapchain(init.swapchain)
-                                .set_desired_extent(init.window_extent.width, init.window_extent.height)
+                                .set_old_swapchain(m_init_data.swapchain)
+                                .set_desired_extent(m_init_data.window_extent.width, m_init_data.window_extent.height)
                                 .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                                 .build();
 
@@ -201,14 +204,15 @@ void Renderer::create_swapchain(InitData& init, RenderData& render)
         std::cerr << "Failed to create swapchain";
     }
 
-    vkb::destroy_swapchain(init.swapchain);
-    init.swapchain = swap_builder_ret.value();
-    render.swapchain_images = init.swapchain.get_images().value();
-    render.swapchain_image_views = init.swapchain.get_image_views().value();
+    vkb::destroy_swapchain(m_init_data.swapchain);
+    m_init_data.swapchain = swap_builder_ret.value();
+    m_render_data.swapchain_images = m_init_data.swapchain.get_images().value();
+    m_render_data.swapchain_image_views = m_init_data.swapchain.get_image_views().value();
+    m_render_data.submit_semaphores.resize(m_render_data.swapchain_images.size());
     std::println("Swapchain created");
 }
 
-void Renderer::init_vma(InitData& init)
+void Renderer::init_vma()
 {
     auto system_info_ret = vkb::SystemInfo::get_system_info();
     if (!system_info_ret)
@@ -218,22 +222,22 @@ void Renderer::init_vma(InitData& init)
     auto system_info = system_info_ret.value();
 
     VmaAllocatorCreateInfo alloc_info = {};
-    alloc_info.instance = init.instance;
-    alloc_info.physicalDevice = init.physical_device;
-    alloc_info.device = init.device;
+    alloc_info.instance = m_init_data.instance;
+    alloc_info.physicalDevice = m_init_data.physical_device;
+    alloc_info.device = m_init_data.device;
     alloc_info.vulkanApiVersion = system_info.instance_api_version;
     alloc_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
-    VK_CHECK(vmaCreateAllocator(&alloc_info, &init.allocator));
+    VK_CHECK(vmaCreateAllocator(&alloc_info, &m_init_data.allocator));
 
     std::println("Vma allocator created");
-    m_deletion_queue.push_function([init]() { vmaDestroyAllocator(init.allocator); });
+    m_deletion_queue.push_function([this]() { vmaDestroyAllocator(m_init_data.allocator); });
 }
 
-void Renderer::create_draw_image(InitData& init, RenderData& render)
+void Renderer::create_draw_image()
 {
-    VkExtent3D draw_image_extent = { init.swapchain.extent.width, init.window_extent.height, 1 };
-    render.draw_image.image_extent = draw_image_extent;
-    render.draw_image.image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    VkExtent3D draw_image_extent = { m_init_data.swapchain.extent.width, m_init_data.window_extent.height, 1 };
+    m_render_data.draw_image.image_extent = draw_image_extent;
+    m_render_data.draw_image.image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
     VkImageUsageFlags image_usage = {};
     image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -245,8 +249,8 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.pNext = nullptr;
     image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.format = render.draw_image.image_format;
-    image_info.extent = render.draw_image.image_extent;
+    image_info.format = m_render_data.draw_image.image_format;
+    image_info.extent = m_render_data.draw_image.image_extent;
     image_info.usage = image_usage;
     image_info.arrayLayers = 1;
     image_info.mipLevels = 1;
@@ -257,16 +261,23 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
     alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    VK_CHECK(vmaCreateImage(
-        init.allocator, &image_info, &alloc_info, &render.draw_image.image, &render.draw_image.allocation, nullptr))
+    VK_CHECK(vmaCreateImage(m_init_data.allocator,
+                            &image_info,
+                            &alloc_info,
+                            &m_render_data.draw_image.image,
+                            &m_render_data.draw_image.allocation,
+                            nullptr));
     m_deletion_queue.push_function(
-        [init, render]() { vmaDestroyImage(init.allocator, render.draw_image.image, render.draw_image.allocation); });
+        [this]()
+        {
+            vmaDestroyImage(m_init_data.allocator, m_render_data.draw_image.image, m_render_data.draw_image.allocation);
+        });
 
     VkImageViewCreateInfo image_view_info = {};
     image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_info.pNext = nullptr;
-    image_view_info.image = render.draw_image.image;
-    image_view_info.format = render.draw_image.image_format;
+    image_view_info.image = m_render_data.draw_image.image;
+    image_view_info.format = m_render_data.draw_image.image_format;
     image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
     image_view_info.subresourceRange.baseMipLevel = 0;
     image_view_info.subresourceRange.levelCount = 1;
@@ -274,36 +285,34 @@ void Renderer::create_draw_image(InitData& init, RenderData& render)
     image_view_info.subresourceRange.layerCount = 1;
     image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-    VK_CHECK(vkCreateImageView(init.device, &image_view_info, nullptr, &render.draw_image.image_view));
-    m_deletion_queue.push_function([init, render]()
-                                   { vkDestroyImageView(init.device, render.draw_image.image_view, nullptr); });
+    VK_CHECK(vkCreateImageView(m_init_data.device, &image_view_info, nullptr, &m_render_data.draw_image.image_view));
+    m_deletion_queue.push_function(
+        [this]() { vkDestroyImageView(m_init_data.device, m_render_data.draw_image.image_view, nullptr); });
 
     std::println("Draw image created\n\twidth: {}\n\theigth: {}",
-                 render.draw_image.image_extent.width,
-                 render.draw_image.image_extent.height);
+                 m_render_data.draw_image.image_extent.width,
+                 m_render_data.draw_image.image_extent.height);
 
     VkDescriptorSetAllocateInfo descriptor_alloc_info = {};
     descriptor_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     descriptor_alloc_info.pNext = nullptr;
-    descriptor_alloc_info.descriptorPool = render.descriptor_pool;
+    descriptor_alloc_info.descriptorPool = m_render_data.descriptor_pool;
     descriptor_alloc_info.descriptorSetCount = 1;
-    descriptor_alloc_info.pSetLayouts = &render.descriptor_layout;
-    VK_CHECK(vkAllocateDescriptorSets(init.device, &descriptor_alloc_info, &render.descriptor_set));
+    descriptor_alloc_info.pSetLayouts = &m_render_data.descriptor_layout;
+    VK_CHECK(vkAllocateDescriptorSets(m_init_data.device, &descriptor_alloc_info, &m_render_data.descriptor_set));
 }
 
-void Renderer::create_command_buffers(InitData& init, RenderData& render)
+void Renderer::create_command_buffers()
 {
     VkCommandPoolCreateInfo command_info = {};
     command_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_info.pNext = nullptr;
-    command_info.queueFamilyIndex = init.device.get_queue_index(vkb::QueueType::graphics).value();
+    command_info.queueFamilyIndex = m_init_data.device.get_queue_index(vkb::QueueType::graphics).value();
     command_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    for (auto& frame : render.frame_data)
+    for (auto& frame : m_render_data.frame_data)
     {
-        VK_CHECK(vkCreateCommandPool(init.device, &command_info, nullptr, &frame.command_pool));
-        frame.deletion_queue.push_function([init, frame]()
-                                           { vkDestroyCommandPool(init.device, frame.command_pool, nullptr); });
+        VK_CHECK(vkCreateCommandPool(m_init_data.device, &command_info, nullptr, &frame.command_pool));
 
         VkCommandBufferAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -312,12 +321,21 @@ void Renderer::create_command_buffers(InitData& init, RenderData& render)
         alloc_info.commandBufferCount = 1;
         alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
-        VK_CHECK(vkAllocateCommandBuffers(init.device, &alloc_info, &frame.command_buffer));
+        VK_CHECK(vkAllocateCommandBuffers(m_init_data.device, &alloc_info, &frame.command_buffer));
     }
+
+    m_deletion_queue.push_function(
+        [this]()
+        {
+            for (size_t i = 0; i < m_render_data.frame_data.size(); i++)
+            {
+                vkDestroyCommandPool(m_init_data.device, m_render_data.frame_data[i].command_pool, nullptr);
+            }
+        });
     std::println("Command buffers created");
 }
 
-void Renderer::init_descriptors(InitData& init, RenderData& render)
+void Renderer::init_descriptors()
 {
     VkDescriptorSetLayoutBinding layout_binding = {};
     layout_binding.binding = 0;
@@ -334,9 +352,9 @@ void Renderer::init_descriptors(InitData& init, RenderData& render)
     layout_info.pNext = nullptr;
     layout_info.bindingCount = (uint32_t)descriptor_layout_bindings.size();
     layout_info.pBindings = descriptor_layout_bindings.data();
-    vkCreateDescriptorSetLayout(init.device, &layout_info, nullptr, &render.descriptor_layout);
-    m_deletion_queue.push_function([init, render]()
-                                   { vkDestroyDescriptorSetLayout(init.device, render.descriptor_layout, nullptr); });
+    vkCreateDescriptorSetLayout(m_init_data.device, &layout_info, nullptr, &m_render_data.descriptor_layout);
+    m_deletion_queue.push_function(
+        [this]() { vkDestroyDescriptorSetLayout(m_init_data.device, m_render_data.descriptor_layout, nullptr); });
 
     std::vector<VkDescriptorPoolSize> pool_sizes = { { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 } };
 
@@ -346,8 +364,50 @@ void Renderer::init_descriptors(InitData& init, RenderData& render)
     pool_info.pPoolSizes = pool_sizes.data();
     pool_info.poolSizeCount = (uint32_t)pool_sizes.size();
     pool_info.maxSets = 1;
-    VK_CHECK(vkCreateDescriptorPool(init.device, &pool_info, nullptr, &render.descriptor_pool));
-    m_deletion_queue.push_function([init, render]()
-                                   { vkDestroyDescriptorPool(init.device, render.descriptor_pool, nullptr); });
+    VK_CHECK(vkCreateDescriptorPool(m_init_data.device, &pool_info, nullptr, &m_render_data.descriptor_pool));
+    m_deletion_queue.push_function(
+        [this]() { vkDestroyDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, nullptr); });
     std::println("Descriptors initialized");
+}
+
+void Renderer::init_sync_structures()
+{
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.pNext = nullptr;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VkSemaphoreCreateInfo semaphore_info = {};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_info.pNext = nullptr;
+
+    for (auto& frame : m_render_data.frame_data)
+    {
+        VK_CHECK(vkCreateFence(m_init_data.device, &fence_info, nullptr, &frame.render_fence));
+        VK_CHECK(vkCreateSemaphore(m_init_data.device, &semaphore_info, nullptr, &frame.acquire_semaphore));
+    }
+
+    m_deletion_queue.push_function(
+        [this]()
+        {
+            for (size_t i = 0; i < m_render_data.frame_data.size(); i++)
+            {
+                vkDestroyFence(m_init_data.device, m_render_data.frame_data[i].render_fence, nullptr);
+                vkDestroySemaphore(m_init_data.device, m_render_data.frame_data[i].acquire_semaphore, nullptr);
+            }
+        });
+
+    for (size_t i = 0; i < m_render_data.swapchain_images.size(); i++)
+    {
+        VK_CHECK(vkCreateSemaphore(m_init_data.device, &semaphore_info, nullptr, &m_render_data.submit_semaphores[i]));
+    }
+
+    m_deletion_queue.push_function(
+        [this]()
+        {
+            for (size_t i = 0; i < m_render_data.swapchain_images.size(); i++)
+            {
+                vkDestroySemaphore(m_init_data.device, m_render_data.submit_semaphores[i], nullptr);
+            }
+        });
 }
