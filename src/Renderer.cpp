@@ -12,6 +12,7 @@
 #include "SDL3/SDL_vulkan.h"
 #include "VkBootstrap.h"
 #include "Initializers.h"
+#include "Utilities.h"
 
 void Renderer::init()
 {
@@ -26,6 +27,7 @@ void Renderer::init()
     create_draw_image();
     create_command_buffers();
     init_sync_structures();
+    init_compute_pipeline();
     std::println("Renderer initialized");
 }
 
@@ -146,8 +148,22 @@ void Renderer::create_surface()
 
 void Renderer::create_physical_device()
 {
+    VkPhysicalDeviceVulkan13Features features13 = {};
+    features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    features13.dynamicRendering = true;
+    features13.synchronization2 = true;
+
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.bufferDeviceAddress = true;
+    features12.descriptorIndexing = true;
+
     vkb::PhysicalDeviceSelector selector{ m_init_data.instance };
-    auto phys_ret = selector.set_surface(m_init_data.surface).prefer_gpu_device_type().select();
+    auto phys_ret = selector.set_surface(m_init_data.surface)
+                        .prefer_gpu_device_type()
+                        .set_required_features_12(features12)
+                        .set_required_features_13(features13)
+                        .select();
     if (!phys_ret)
     {
         std::cerr << "Failed to select Vulkan Physical Device. Error: " << phys_ret.error().message() << "\n";
@@ -165,14 +181,14 @@ void Renderer::create_physical_device()
         }
     }
 
-    std::vector<const char*> extensions = { VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
-                                            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
-                                            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-                                            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME };
-    if (!phys_ret->enable_extensions_if_present(extensions))
-    {
-        std::cerr << "One or more device extensions not supported!" << std::endl;
-    }
+    // std::vector<const char*> extensions = { VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+    //                                         VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+    //                                         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+    //                                         VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME };
+    // if (!phys_ret->enable_extensions_if_present(extensions))
+    // {
+    //     std::cerr << "One or more device extensions not supported!" << std::endl;
+    // }
 
     m_init_data.physical_device = phys_ret.value();
     std::println("Physical device created");
@@ -304,6 +320,26 @@ void Renderer::create_draw_image()
     descriptor_alloc_info.descriptorSetCount = 1;
     descriptor_alloc_info.pSetLayouts = &m_render_data.descriptor_layout;
     VK_CHECK(vkAllocateDescriptorSets(m_init_data.device, &descriptor_alloc_info, &m_render_data.descriptor_set));
+    update_draw_image_descriptor();
+}
+
+void Renderer::update_draw_image_descriptor()
+{
+    VkDescriptorImageInfo image_info = {};
+    image_info.sampler = VK_NULL_HANDLE;                        // storage image, no sampler
+    image_info.imageView = m_render_data.draw_image.image_view; // your created view
+    image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;           // matches how you use it
+
+    VkWriteDescriptorSet write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_render_data.descriptor_set;
+    write.dstBinding = 0;
+    write.dstArrayElement = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.pImageInfo = &image_info;
+
+    vkUpdateDescriptorSets(m_init_data.device, 1, &write, 0, nullptr);
 }
 
 void Renderer::create_command_buffers()
@@ -463,7 +499,7 @@ void Renderer::init_compute_pipeline()
     VK_CHECK(vkCreatePipelineLayout(m_init_data.device, &layout_info, nullptr, &m_render_data.compute_layout));
 
     VkShaderModule gradient_shader_module = {};
-    if (load_shader_module("../../src/shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
+    if (!load_shader_module("../../src/shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
     {
         std::cerr << "Failed to load gradient shader" << std::endl;
     }
@@ -498,39 +534,12 @@ void Renderer::init_compute_pipeline()
     std::println("Compute pipeline initialized");
 }
 
-void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout)
-{
-    VkImageMemoryBarrier2 image_barrier = {};
-    image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-    image_barrier.pNext = nullptr;
-    image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    image_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-    image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    image_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
-    image_barrier.oldLayout = current_layout;
-    image_barrier.newLayout = new_layout;
-
-    VkImageAspectFlags aspect_mask = (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
-                                         ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                         : VK_IMAGE_ASPECT_COLOR_BIT;
-    image_barrier.subresourceRange = init::image_subresource_range(aspect_mask);
-    image_barrier.image = image;
-
-    VkDependencyInfo dependency_info{};
-    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    dependency_info.pNext = nullptr;
-    dependency_info.imageMemoryBarrierCount = 1;
-    dependency_info.pImageMemoryBarriers = &image_barrier;
-
-    vkCmdPipelineBarrier2(cmd, &dependency_info);
-}
-
 void Renderer::draw_frame()
 {
     VK_CHECK(vkWaitForFences(m_init_data.device, 1, &get_current_frame().render_fence, true, 1'000'000'000));
     VK_CHECK(vkResetFences(m_init_data.device, 1, &get_current_frame().render_fence));
     get_current_frame().flush_frame_data();
-    vkResetDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, 0);
+    // vkResetDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, 0);
 
     uint32_t swapchain_image_index;
     VK_CHECK(vkAcquireNextImageKHR(m_init_data.device,
@@ -557,16 +566,16 @@ void Renderer::draw_frame()
     // m_draw_image_extent.height = m_draw_image.image_extent.height;
 
     // For compute
-    // VkCommandBufferBeginInfo begin_info =
-    // init::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    VkCommandBufferBeginInfo begin_info = {};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.pNext = nullptr;
-    begin_info.pInheritanceInfo = nullptr;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo begin_info = init::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    // VkCommandBufferBeginInfo begin_info = {};
+    // begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    // begin_info.pNext = nullptr;
+    // begin_info.pInheritanceInfo = nullptr;
+    // begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd_buffer, &begin_info));
 
-    transition_image(cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    util::transition_image(
+        cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     // Draw Compute
     // ComputeEffect& compute_effect = m_background_effects[m_current_background_effect];
@@ -594,26 +603,33 @@ void Renderer::draw_frame()
                   std::ceil(m_render_data.draw_image.image_extent.height / 16.0),
                   1);
 
+    util::transition_image(
+        cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     // For imgui
     // util::transition_image(
     //     cmd_buffer, m_draw_image.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
     //     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    // util::transition_image(cmd_buffer,
-    //                        m_swapchain_images[swapchain_image_index],
-    //                        VK_IMAGE_LAYOUT_UNDEFINED,
-    //                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    // util::copy_image_to_image(
-    //     cmd_buffer, m_draw_image.image, m_swapchain_images[swapchain_image_index], m_draw_extent,
-    //     m_swapchain_extent);
-    // util::transition_image(cmd_buffer,
-    //                        m_swapchain_images[swapchain_image_index],
-    //                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-    //                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    // draw_imgui(cmd_buffer, m_swapchain_image_views[swapchain_image_index]);
-    transition_image(cmd_buffer,
-                     m_render_data.swapchain_images[swapchain_image_index],
-                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    util::transition_image(cmd_buffer,
+                           m_render_data.swapchain_images[swapchain_image_index],
+                           VK_IMAGE_LAYOUT_UNDEFINED,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkExtent2D draw_extent_2D = { m_render_data.draw_image.image_extent.width,
+                                  m_render_data.draw_image.image_extent.height };
+    util::copy_image_to_image(cmd_buffer,
+                              m_render_data.draw_image.image,
+                              m_render_data.swapchain_images[swapchain_image_index],
+                              draw_extent_2D,
+                              m_init_data.swapchain.extent);
+    //  util::transition_image(cmd_buffer,
+    //                         m_swapchain_images[swapchain_image_index],
+    //                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    //  draw_imgui(cmd_buffer, m_swapchain_image_views[swapchain_image_index]);
+    util::transition_image(cmd_buffer,
+                           m_render_data.swapchain_images[swapchain_image_index],
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     VK_CHECK(vkEndCommandBuffer(cmd_buffer));
 
     VkCommandBufferSubmitInfo cmd_buffer_info = init::command_buffer_submit_info(cmd_buffer);

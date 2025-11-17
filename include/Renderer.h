@@ -132,6 +132,7 @@ private:
     void create_swapchain();
     void init_vma();
     void create_draw_image();
+    void update_draw_image_descriptor();
     void create_command_buffers();
     void init_descriptors();
     void init_sync_structures();

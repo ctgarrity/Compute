@@ -26,6 +26,7 @@ set(SOURCES
     src/Renderer.cpp
     src/VmaUsage.cpp
     src/Initializers.cpp
+    src/Utilities.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
