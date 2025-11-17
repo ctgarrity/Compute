@@ -499,7 +499,7 @@ void Renderer::init_compute_pipeline()
     VK_CHECK(vkCreatePipelineLayout(m_init_data.device, &layout_info, nullptr, &m_render_data.compute_layout));
 
     VkShaderModule gradient_shader_module = {};
-    if (!load_shader_module("../../src/shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
+    if (!load_shader_module("shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
     {
         std::cerr << "Failed to load gradient shader" << std::endl;
         return;
