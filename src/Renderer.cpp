@@ -255,7 +255,7 @@ void Renderer::init_vma()
 
 void Renderer::create_draw_image()
 {
-    VkExtent3D draw_image_extent = { m_init_data.swapchain.extent.width, m_init_data.window_extent.height, 1 };
+    VkExtent3D draw_image_extent = { m_init_data.swapchain.extent.width, m_init_data.swapchain.extent.height, 1 };
     m_render_data.draw_image.image_extent = draw_image_extent;
     m_render_data.draw_image.image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
 
@@ -502,6 +502,7 @@ void Renderer::init_compute_pipeline()
     if (!load_shader_module("../../src/shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
     {
         std::cerr << "Failed to load gradient shader" << std::endl;
+        return;
     }
 
     VkPipelineShaderStageCreateInfo stage_info = {};
@@ -598,10 +599,13 @@ void Renderer::draw_frame()
                        sizeof(PushConstantsData),
                        &m_render_data.push_constants_data);
 
-    vkCmdDispatch(cmd_buffer,
-                  std::ceil(m_render_data.draw_image.image_extent.width / 16.0),
-                  std::ceil(m_render_data.draw_image.image_extent.height / 16.0),
-                  1);
+    const uint32_t local_size_x = 16;
+    const uint32_t local_size_y = 16;
+
+    const uint32_t group_x = (m_render_data.draw_image.image_extent.width + local_size_x - 1) / local_size_x;
+    const uint32_t group_y = (m_render_data.draw_image.image_extent.height + local_size_y - 1) / local_size_y;
+
+    vkCmdDispatch(cmd_buffer, group_x, group_y, 1);
 
     util::transition_image(
         cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
