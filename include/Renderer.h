@@ -1,9 +1,11 @@
 #pragma once
 #include <vulkan/vulkan_core.h>
+#include "glm/fwd.hpp"
 #include "vulkan/vk_enum_string_helper.h"
 #include "SDL3/SDL_video.h"
 #include "VkBootstrap.h"
 #include "vk_mem_alloc.h"
+#include "glm/glm.hpp"
 
 #include <deque>
 #include <functional>
@@ -35,6 +37,7 @@ class Renderer
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         vkb::PhysicalDevice physical_device = {};
         vkb::Device device = {};
+        // uint32_t graphics_queue_index;
         vkb::Swapchain swapchain = {};
         VmaAllocator allocator = {};
     };
@@ -71,13 +74,28 @@ class Renderer
 
     struct FrameData
     {
+    private:
         DeletionQueue deletion_queue;
 
+    public:
         VkCommandPool command_pool;
         VkCommandBuffer command_buffer;
 
         VkSemaphore acquire_semaphore;
         VkFence render_fence;
+
+        void flush_frame_data()
+        {
+            deletion_queue.flush();
+        }
+    };
+
+    struct PushConstantsData
+    {
+        glm::vec4 data1;
+        glm::vec4 data2;
+        glm::vec4 data3;
+        glm::vec4 data4;
     };
 
     struct RenderData
@@ -86,10 +104,14 @@ class Renderer
         std::vector<VkImageView> swapchain_image_views;
         AllocatedImage draw_image;
         std::array<FrameData, FRAMES_IN_FLIGHT> frame_data;
+        uint32_t frame_index = 0;
         std::vector<VkSemaphore> submit_semaphores;
-        VkDescriptorSetLayout descriptor_layout;
-        VkDescriptorPool descriptor_pool;
-        VkDescriptorSet descriptor_set;
+        VkDescriptorSetLayout descriptor_layout = VK_NULL_HANDLE;
+        VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
+        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+        VkPipelineLayout compute_layout = VK_NULL_HANDLE;
+        VkPipeline compute_pipeline = VK_NULL_HANDLE;
+        PushConstantsData push_constants_data;
     };
 
 public:
@@ -113,4 +135,10 @@ private:
     void create_command_buffers();
     void init_descriptors();
     void init_sync_structures();
+    void init_compute_pipeline();
+    void draw_frame();
+    FrameData& get_current_frame()
+    {
+        return m_render_data.frame_data[m_render_data.frame_index % FRAMES_IN_FLIGHT];
+    };
 };

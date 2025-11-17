@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <iostream>
 #include <print>
+#include <fstream>
 
 #include <vulkan/vulkan_core.h>
 #include "SDL3/SDL_init.h"
@@ -10,6 +11,7 @@
 #include "SDL3/SDL_video.h"
 #include "SDL3/SDL_vulkan.h"
 #include "VkBootstrap.h"
+#include "Initializers.h"
 
 void Renderer::init()
 {
@@ -34,7 +36,7 @@ void Renderer::destroy()
     vkb::destroy_swapchain(m_init_data.swapchain);
     for (auto& frame : m_render_data.frame_data)
     {
-        frame.deletion_queue.flush();
+        frame.flush_frame_data();
     }
     m_deletion_queue.flush();
     std::println("Renderer destroyed");
@@ -60,6 +62,7 @@ void Renderer::run()
             SDL_Delay(10);
             continue;
         }
+        draw_frame();
     }
 }
 
@@ -188,6 +191,7 @@ void Renderer::create_device()
     std::println("Device created");
 
     m_deletion_queue.push_function([this]() { vkb::destroy_device(m_init_data.device); });
+    // m_init_data.graphics_queue_index = m_init_data.device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
 void Renderer::create_swapchain()
@@ -410,4 +414,231 @@ void Renderer::init_sync_structures()
                 vkDestroySemaphore(m_init_data.device, m_render_data.submit_semaphores[i], nullptr);
             }
         });
+    std::println("Sync structures initialized");
+}
+
+bool load_shader_module(const char* file_path, VkDevice device, VkShaderModule* out_shader_module)
+{
+    std::ifstream file(file_path, std::ios::ate | std::ios::binary);
+    if (!file.is_open())
+    {
+        return false;
+    }
+
+    const size_t file_size = file.tellg();
+    std::vector<uint32_t> buffer(file_size / sizeof(uint32_t));
+    file.seekg(0);
+    file.read((char*)buffer.data(), file_size);
+    file.close();
+
+    VkShaderModuleCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    create_info.pNext = nullptr;
+    create_info.codeSize = buffer.size() * sizeof(uint32_t);
+    create_info.pCode = buffer.data();
+
+    VkShaderModule shader_module = {};
+    if (vkCreateShaderModule(device, &create_info, nullptr, &shader_module) != VK_SUCCESS)
+    {
+        return false;
+    }
+    *out_shader_module = shader_module;
+    return true;
+}
+
+void Renderer::init_compute_pipeline()
+{
+    VkPushConstantRange push_constant_range = {};
+    push_constant_range.offset = 0;
+    push_constant_range.size = sizeof(PushConstantsData);
+    push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkPipelineLayoutCreateInfo layout_info = {};
+    layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layout_info.pNext = nullptr;
+    layout_info.pSetLayouts = &m_render_data.descriptor_layout;
+    layout_info.setLayoutCount = 1;
+    layout_info.pPushConstantRanges = &push_constant_range;
+    layout_info.pushConstantRangeCount = 1;
+    VK_CHECK(vkCreatePipelineLayout(m_init_data.device, &layout_info, nullptr, &m_render_data.compute_layout));
+
+    VkShaderModule gradient_shader_module = {};
+    if (load_shader_module("../../src/shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
+    {
+        std::cerr << "Failed to load gradient shader" << std::endl;
+    }
+
+    VkPipelineShaderStageCreateInfo stage_info = {};
+    stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage_info.pNext = nullptr;
+    stage_info.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    stage_info.module = gradient_shader_module;
+    stage_info.pName = "main";
+
+    VkComputePipelineCreateInfo compute_pipeline_create_info = {};
+    compute_pipeline_create_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    compute_pipeline_create_info.pNext = nullptr;
+    compute_pipeline_create_info.layout = m_render_data.compute_layout;
+    compute_pipeline_create_info.stage = stage_info;
+
+    VK_CHECK(vkCreateComputePipelines(m_init_data.device,
+                                      VK_NULL_HANDLE,
+                                      1,
+                                      &compute_pipeline_create_info,
+                                      nullptr,
+                                      &m_render_data.compute_pipeline));
+
+    vkDestroyShaderModule(m_init_data.device, gradient_shader_module, nullptr);
+    m_deletion_queue.push_function(
+        [this]()
+        {
+            vkDestroyPipelineLayout(m_init_data.device, m_render_data.compute_layout, nullptr);
+            vkDestroyPipeline(m_init_data.device, m_render_data.compute_pipeline, nullptr);
+        });
+    std::println("Compute pipeline initialized");
+}
+
+void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout)
+{
+    VkImageMemoryBarrier2 image_barrier = {};
+    image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    image_barrier.pNext = nullptr;
+    image_barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    image_barrier.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    image_barrier.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    image_barrier.dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT;
+    image_barrier.oldLayout = current_layout;
+    image_barrier.newLayout = new_layout;
+
+    VkImageAspectFlags aspect_mask = (new_layout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL)
+                                         ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                         : VK_IMAGE_ASPECT_COLOR_BIT;
+    image_barrier.subresourceRange = init::image_subresource_range(aspect_mask);
+    image_barrier.image = image;
+
+    VkDependencyInfo dependency_info{};
+    dependency_info.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency_info.pNext = nullptr;
+    dependency_info.imageMemoryBarrierCount = 1;
+    dependency_info.pImageMemoryBarriers = &image_barrier;
+
+    vkCmdPipelineBarrier2(cmd, &dependency_info);
+}
+
+void Renderer::draw_frame()
+{
+    VK_CHECK(vkWaitForFences(m_init_data.device, 1, &get_current_frame().render_fence, true, 1'000'000'000));
+    VK_CHECK(vkResetFences(m_init_data.device, 1, &get_current_frame().render_fence));
+    get_current_frame().flush_frame_data();
+    vkResetDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, 0);
+
+    uint32_t swapchain_image_index;
+    VK_CHECK(vkAcquireNextImageKHR(m_init_data.device,
+                                   m_init_data.swapchain,
+                                   1'000'000'000,
+                                   get_current_frame().acquire_semaphore,
+                                   nullptr,
+                                   &swapchain_image_index));
+    // VkResult result = vkAcquireNextImageKHR(m_vkb_device.device, m_vkb_swapchain.swapchain, 1'000'000'000,
+    // get_current_frame().acquire_semaphore, nullptr, &swapchain_image_index); if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    // {
+    //     resize_requested = true;
+    //     return;
+    // }
+
+    VkCommandBuffer cmd_buffer = get_current_frame().command_buffer;
+    VK_CHECK(vkResetCommandBuffer(cmd_buffer, 0));
+
+    // m_draw_extent.height = std::min(m_swapchain_extent.height, m_draw_image.image_extent.height) * m_render_scale;
+    // m_draw_extent.width = std::min(m_swapchain_extent.width, m_draw_image.image_extent.width) * m_render_scale;
+
+    // Todo: Replace where these are used?
+    // m_draw_image_extent.width = m_draw_image.image_extent.width;
+    // m_draw_image_extent.height = m_draw_image.image_extent.height;
+
+    // For compute
+    // VkCommandBufferBeginInfo begin_info =
+    // init::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.pNext = nullptr;
+    begin_info.pInheritanceInfo = nullptr;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd_buffer, &begin_info));
+
+    transition_image(cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    // Draw Compute
+    // ComputeEffect& compute_effect = m_background_effects[m_current_background_effect];
+    // compute_effect.data.data3.x = std::floor(m_mouse_position.x / 16.0f);
+    // compute_effect.data.data3.y = std::floor(m_mouse_position.y / 16.0f);
+
+    vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_render_data.compute_pipeline);
+    vkCmdBindDescriptorSets(cmd_buffer,
+                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                            m_render_data.compute_layout,
+                            0,
+                            1,
+                            &m_render_data.descriptor_set,
+                            0,
+                            nullptr);
+    vkCmdPushConstants(cmd_buffer,
+                       m_render_data.compute_layout,
+                       VK_SHADER_STAGE_COMPUTE_BIT,
+                       0,
+                       sizeof(PushConstantsData),
+                       &m_render_data.push_constants_data);
+
+    vkCmdDispatch(cmd_buffer,
+                  std::ceil(m_render_data.draw_image.image_extent.width / 16.0),
+                  std::ceil(m_render_data.draw_image.image_extent.height / 16.0),
+                  1);
+
+    // For imgui
+    // util::transition_image(
+    //     cmd_buffer, m_draw_image.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    //     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    // util::transition_image(cmd_buffer,
+    //                        m_swapchain_images[swapchain_image_index],
+    //                        VK_IMAGE_LAYOUT_UNDEFINED,
+    //                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    // util::copy_image_to_image(
+    //     cmd_buffer, m_draw_image.image, m_swapchain_images[swapchain_image_index], m_draw_extent,
+    //     m_swapchain_extent);
+    // util::transition_image(cmd_buffer,
+    //                        m_swapchain_images[swapchain_image_index],
+    //                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    //                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    // draw_imgui(cmd_buffer, m_swapchain_image_views[swapchain_image_index]);
+    transition_image(cmd_buffer,
+                     m_render_data.swapchain_images[swapchain_image_index],
+                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    VK_CHECK(vkEndCommandBuffer(cmd_buffer));
+
+    VkCommandBufferSubmitInfo cmd_buffer_info = init::command_buffer_submit_info(cmd_buffer);
+    VkSemaphoreSubmitInfo wait_info = init::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR,
+                                                                  get_current_frame().acquire_semaphore);
+    VkSemaphoreSubmitInfo signal_info = init::semaphore_submit_info(
+        VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, m_render_data.submit_semaphores[swapchain_image_index]);
+    VkSubmitInfo2 submit = init::submit_info(&cmd_buffer_info, &signal_info, &wait_info);
+    VK_CHECK(vkQueueSubmit2(
+        m_init_data.device.get_queue(vkb::QueueType::graphics).value(), 1, &submit, get_current_frame().render_fence));
+
+    VkPresentInfoKHR present_info = {};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.pNext = nullptr;
+    present_info.pSwapchains = &m_init_data.swapchain.swapchain;
+    present_info.swapchainCount = 1;
+    present_info.pWaitSemaphores = &m_render_data.submit_semaphores[swapchain_image_index];
+    present_info.waitSemaphoreCount = 1;
+    present_info.pImageIndices = &swapchain_image_index;
+
+    VK_CHECK(vkQueuePresentKHR(m_init_data.device.get_queue(vkb::QueueType::graphics).value(), &present_info));
+    // result = vkQueuePresentKHR(m_graphics_queue, &present_info);
+    // if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    // {
+    //     resize_requested = true;
+    // }
+    m_render_data.frame_index++;
 }
