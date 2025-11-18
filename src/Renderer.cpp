@@ -60,6 +60,7 @@ void Renderer::run()
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
+            ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT)
                 done = true;
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
@@ -75,7 +76,7 @@ void Renderer::run()
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
-        if (ImGui::Begin("background"))
+        if (ImGui::Begin("Push Constants"))
         {
             ImGui::InputFloat4("data1", (float*)&m_render_data.push_constants_data.data1);
             ImGui::InputFloat4("data2", (float*)&m_render_data.push_constants_data.data2);
@@ -108,7 +109,7 @@ void Renderer::init_sdl()
     {
         std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
     }
-    SDL_SetWindowFullscreen(m_init_data.window, true);
+    // SDL_SetWindowFullscreen(m_init_data.window, true);
 
     m_deletion_queue.push_function([this]() { SDL_DestroyWindow(m_init_data.window); });
 
