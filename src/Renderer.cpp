@@ -6,13 +6,20 @@
 #include <fstream>
 
 #include <vulkan/vulkan_core.h>
+
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "SDL3/SDL_video.h"
 #include "SDL3/SDL_vulkan.h"
+
 #include "VkBootstrap.h"
+
 #include "Initializers.h"
 #include "Utilities.h"
+
+#include "imgui.h"
+#include "backends/imgui_impl_sdl3.h"
+#include "backends/imgui_impl_vulkan.h"
 
 void Renderer::init()
 {
@@ -27,6 +34,7 @@ void Renderer::init()
     create_draw_image();
     create_command_buffers();
     init_sync_structures();
+    init_imgui();
     init_compute_pipeline();
     std::println("Renderer initialized");
 }
@@ -64,6 +72,18 @@ void Renderer::run()
             SDL_Delay(10);
             continue;
         }
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        if (ImGui::Begin("background"))
+        {
+            ImGui::InputFloat4("data1", (float*)&m_render_data.push_constants_data.data1);
+            ImGui::InputFloat4("data2", (float*)&m_render_data.push_constants_data.data2);
+            ImGui::InputFloat4("data3", (float*)&m_render_data.push_constants_data.data3);
+            ImGui::InputFloat4("data4", (float*)&m_render_data.push_constants_data.data4);
+        }
+        ImGui::End();
+        ImGui::Render();
         draw_frame();
     }
 }
@@ -88,6 +108,7 @@ void Renderer::init_sdl()
     {
         std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
     }
+    SDL_SetWindowFullscreen(m_init_data.window, true);
 
     m_deletion_queue.push_function([this]() { SDL_DestroyWindow(m_init_data.window); });
 
@@ -453,6 +474,70 @@ void Renderer::init_sync_structures()
     std::println("Sync structures initialized");
 }
 
+void Renderer::init_imgui()
+{
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    ImGui_ImplSDL3_InitForVulkan(m_init_data.window);
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = m_init_data.instance;
+    init_info.PhysicalDevice = m_init_data.physical_device;
+    init_info.Device = m_init_data.device;
+    init_info.QueueFamily = m_init_data.device.get_queue_index(vkb::QueueType::graphics).value();
+    init_info.Queue = m_init_data.device.get_queue(vkb::QueueType::graphics).value();
+    // init_info.PipelineCache = YOUR_PIPELINE_CACHE; // optional
+    // init_info.DescriptorPool = YOUR_DESCRIPTOR_POOL; // see below Todo: Check if the DescriptorPoolSize is correct
+    init_info.DescriptorPoolSize =
+        IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE; // (Optional) Set to create internal descriptor pool instead
+                                                           // of using DescriptorPool
+    init_info.PipelineInfoMain.Subpass = 0;
+    init_info.MinImageCount = 2;
+    init_info.ImageCount = 2;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.UseDynamicRendering = true;
+    // init_info.Allocator = YOUR_ALLOCATOR; // optional
+    // init_info.CheckVkResultFn = check_vk_result; // optional
+
+    VkPipelineRenderingCreateInfo pipeline_rendering_create_info = {};
+    pipeline_rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    pipeline_rendering_create_info.pNext = nullptr;
+    pipeline_rendering_create_info.colorAttachmentCount = 1;
+    pipeline_rendering_create_info.pColorAttachmentFormats = &m_init_data.swapchain.image_format;
+
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = pipeline_rendering_create_info;
+
+    ImGui_ImplVulkan_Init(&init_info);
+    // (this gets a bit more complicated, see example app for full reference)
+    // ImGui_ImplVulkan_CreateFontsTexture(get_current_frame().main_command_buffer);
+    // (your code submit a queue)
+    // ImGui_ImplVulkan_DestroyFontUploadObjects();
+    m_deletion_queue.push_function(
+        [&]()
+        {
+            ImGui_ImplVulkan_Shutdown();
+            ImGui_ImplSDL3_Shutdown();
+            ImGui::DestroyContext();
+        });
+
+    std::cout << "imgui initialized" << std::endl;
+}
+
+void Renderer::draw_imgui(VkCommandBuffer cmd, VkImageView target_image_view)
+{
+    VkRenderingAttachmentInfo color_attachment =
+        init::color_attachment_info(target_image_view, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    VkRenderingInfo render_info = init::rendering_info(m_init_data.swapchain.extent, &color_attachment, nullptr);
+
+    vkCmdBeginRendering(cmd, &render_info);
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+    vkCmdEndRendering(cmd);
+}
+
 bool load_shader_module(const char* file_path, VkDevice device, VkShaderModule* out_shader_module)
 {
     std::ifstream file(file_path, std::ios::ate | std::ios::binary);
@@ -540,7 +625,6 @@ void Renderer::draw_frame()
     VK_CHECK(vkWaitForFences(m_init_data.device, 1, &get_current_frame().render_fence, true, 1'000'000'000));
     VK_CHECK(vkResetFences(m_init_data.device, 1, &get_current_frame().render_fence));
     get_current_frame().flush_frame_data();
-    // vkResetDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, 0);
 
     uint32_t swapchain_image_index;
     VK_CHECK(vkAcquireNextImageKHR(m_init_data.device,
@@ -558,30 +642,11 @@ void Renderer::draw_frame()
 
     VkCommandBuffer cmd_buffer = get_current_frame().command_buffer;
     VK_CHECK(vkResetCommandBuffer(cmd_buffer, 0));
-
-    // m_draw_extent.height = std::min(m_swapchain_extent.height, m_draw_image.image_extent.height) * m_render_scale;
-    // m_draw_extent.width = std::min(m_swapchain_extent.width, m_draw_image.image_extent.width) * m_render_scale;
-
-    // Todo: Replace where these are used?
-    // m_draw_image_extent.width = m_draw_image.image_extent.width;
-    // m_draw_image_extent.height = m_draw_image.image_extent.height;
-
-    // For compute
     VkCommandBufferBeginInfo begin_info = init::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-    // VkCommandBufferBeginInfo begin_info = {};
-    // begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    // begin_info.pNext = nullptr;
-    // begin_info.pInheritanceInfo = nullptr;
-    // begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd_buffer, &begin_info));
 
     util::transition_image(
         cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-    // Draw Compute
-    // ComputeEffect& compute_effect = m_background_effects[m_current_background_effect];
-    // compute_effect.data.data3.x = std::floor(m_mouse_position.x / 16.0f);
-    // compute_effect.data.data3.y = std::floor(m_mouse_position.y / 16.0f);
 
     vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_render_data.compute_pipeline);
     vkCmdBindDescriptorSets(cmd_buffer,
@@ -592,6 +657,9 @@ void Renderer::draw_frame()
                             &m_render_data.descriptor_set,
                             0,
                             nullptr);
+
+    float time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+    m_render_data.push_constants_data.data1.x = time;
     vkCmdPushConstants(cmd_buffer,
                        m_render_data.compute_layout,
                        VK_SHADER_STAGE_COMPUTE_BIT,
@@ -601,18 +669,12 @@ void Renderer::draw_frame()
 
     const uint32_t local_size_x = 16;
     const uint32_t local_size_y = 16;
-
     const uint32_t group_x = (m_render_data.draw_image.image_extent.width + local_size_x - 1) / local_size_x;
     const uint32_t group_y = (m_render_data.draw_image.image_extent.height + local_size_y - 1) / local_size_y;
-
     vkCmdDispatch(cmd_buffer, group_x, group_y, 1);
 
     util::transition_image(
         cmd_buffer, m_render_data.draw_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    // For imgui
-    // util::transition_image(
-    //     cmd_buffer, m_draw_image.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-    //     VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     util::transition_image(cmd_buffer,
                            m_render_data.swapchain_images[swapchain_image_index],
                            VK_IMAGE_LAYOUT_UNDEFINED,
@@ -625,14 +687,14 @@ void Renderer::draw_frame()
                               m_render_data.swapchain_images[swapchain_image_index],
                               draw_extent_2D,
                               m_init_data.swapchain.extent);
-    //  util::transition_image(cmd_buffer,
-    //                         m_swapchain_images[swapchain_image_index],
-    //                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-    //                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    //  draw_imgui(cmd_buffer, m_swapchain_image_views[swapchain_image_index]);
     util::transition_image(cmd_buffer,
                            m_render_data.swapchain_images[swapchain_image_index],
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    draw_imgui(cmd_buffer, m_render_data.swapchain_image_views[swapchain_image_index]);
+    util::transition_image(cmd_buffer,
+                           m_render_data.swapchain_images[swapchain_image_index],
+                           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
     VK_CHECK(vkEndCommandBuffer(cmd_buffer));
 

@@ -136,6 +136,8 @@ private:
     void create_command_buffers();
     void init_descriptors();
     void init_sync_structures();
+    void init_imgui();
+    void draw_imgui(VkCommandBuffer cmd, VkImageView target_image_view);
     void init_compute_pipeline();
     void draw_frame();
     FrameData& get_current_frame()

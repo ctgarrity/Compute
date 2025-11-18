@@ -27,6 +27,12 @@ set(SOURCES
     src/VmaUsage.cpp
     src/Initializers.cpp
     src/Utilities.cpp
+    vendored/imgui/imgui.cpp
+    vendored/imgui/imgui_draw.cpp
+    vendored/imgui/imgui_tables.cpp
+    vendored/imgui/imgui_widgets.cpp
+    vendored/imgui/backends/imgui_impl_sdl3.cpp
+    vendored/imgui/backends/imgui_impl_vulkan.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
