@@ -17,6 +17,7 @@
 #include "Initializers.h"
 #include "Utilities.h"
 
+#include "glm/fwd.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_vulkan.h"
@@ -78,10 +79,10 @@ void Renderer::run()
         ImGui::NewFrame();
         if (ImGui::Begin("Push Constants"))
         {
-            ImGui::InputFloat4("data1", (float*)&m_render_data.push_constants_data.data1);
-            ImGui::InputFloat4("data2", (float*)&m_render_data.push_constants_data.data2);
-            ImGui::InputFloat4("data3", (float*)&m_render_data.push_constants_data.data3);
-            ImGui::InputFloat4("data4", (float*)&m_render_data.push_constants_data.data4);
+            ImGui::InputFloat("Time", (float*)&m_render_data.push_constants_data.time);
+            ImGui::InputFloat3("Color 1", (float*)&m_render_data.push_constants_data.color1);
+            ImGui::InputFloat3("Color 2", (float*)&m_render_data.push_constants_data.color2);
+            ImGui::InputFloat2("Cell Coords", (float*)&m_render_data.push_constants_data.cell_coords);
         }
         ImGui::End();
         ImGui::Render();
@@ -100,11 +101,18 @@ void Renderer::init_sdl()
     // Create window with Vulkan graphics context
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     SDL_WindowFlags window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    m_init_data.window_extent = { 1280, 800 };
+    uint32_t requested_width = 1280;
+    uint32_t requested_height = 800;
+    m_init_data.window_extent = { requested_width, requested_height };
     m_init_data.window = SDL_CreateWindow("Vulkan Compute",
                                           (int)(m_init_data.window_extent.width * main_scale),
                                           (int)(m_init_data.window_extent.height * main_scale),
                                           window_flags);
+    int h, w;
+    SDL_GetWindowSize(m_init_data.window, &w, &h);
+    m_init_data.window_extent.width = w;
+    m_init_data.window_extent.height = h;
+    std::println("Window size: Width {}, Height {}", m_init_data.window_extent.width, m_init_data.window_extent.height);
     if (!m_init_data.window)
     {
         std::cerr << "Error: SDL_CreateWindow(): " << SDL_GetError() << std::endl;
@@ -621,6 +629,12 @@ void Renderer::init_compute_pipeline()
     std::println("Compute pipeline initialized");
 }
 
+void Renderer::init_push_constants()
+{
+    m_render_data.push_constants_data.color1 = glm::vec3(1.0f, 0.0f, 0.0f);
+    m_render_data.push_constants_data.color2 = glm::vec3(0.0f, 0.0f, 1.0f);
+}
+
 void Renderer::draw_frame()
 {
     VK_CHECK(vkWaitForFences(m_init_data.device, 1, &get_current_frame().render_fence, true, 1'000'000'000));
@@ -659,8 +673,7 @@ void Renderer::draw_frame()
                             0,
                             nullptr);
 
-    float time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
-    m_render_data.push_constants_data.data1.x = time;
+    m_render_data.push_constants_data.time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
     vkCmdPushConstants(cmd_buffer,
                        m_render_data.compute_layout,
                        VK_SHADER_STAGE_COMPUTE_BIT,

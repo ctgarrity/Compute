@@ -92,10 +92,10 @@ class Renderer
 
     struct PushConstantsData
     {
-        glm::vec4 data1 = {};
-        glm::vec4 data2 = {};
-        glm::vec4 data3 = {};
-        glm::vec4 data4 = {};
+        float time = 0.0f;
+        glm::vec3 color1 = {};
+        glm::vec3 color2 = {};
+        glm::vec2 cell_coords = {};
     };
 
     struct RenderData
@@ -139,6 +139,7 @@ private:
     void init_imgui();
     void draw_imgui(VkCommandBuffer cmd, VkImageView target_image_view);
     void init_compute_pipeline();
+    void init_push_constants();
     void draw_frame();
     FrameData& get_current_frame()
     {
