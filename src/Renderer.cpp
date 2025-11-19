@@ -67,6 +67,10 @@ void Renderer::run()
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                 event.window.windowID == SDL_GetWindowID(m_init_data.window))
                 done = true;
+            if (event.window.type == SDL_EVENT_WINDOW_RESIZED)
+            {
+                m_render_data.resize_requested = true;
+            }
         }
 
         if (SDL_GetWindowFlags(m_init_data.window) & SDL_WINDOW_MINIMIZED)
@@ -74,6 +78,16 @@ void Renderer::run()
             SDL_Delay(10);
             continue;
         }
+
+        if (m_render_data.resize_requested)
+        {
+            int width, height;
+            SDL_GetWindowSize(m_init_data.window, &width, &height);
+            m_init_data.window_extent.width = width;
+            m_init_data.window_extent.height = height;
+            recreate_swapchain();
+        }
+
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -243,23 +257,33 @@ void Renderer::create_device()
 void Renderer::create_swapchain()
 {
     vkb::SwapchainBuilder swapchain_builder{ m_init_data.device };
-    auto swap_builder_ret = swapchain_builder.set_desired_min_image_count(3)
-                                .set_old_swapchain(m_init_data.swapchain)
-                                .set_desired_extent(m_init_data.window_extent.width, m_init_data.window_extent.height)
-                                .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                                .build();
+    auto swap_builder_ret =
+        swapchain_builder.set_old_swapchain(m_init_data.swapchain)
+            .set_desired_min_image_count(3)
+            .set_desired_extent(m_init_data.window_extent.width, m_init_data.window_extent.height)
+            .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+            .build();
 
     if (!swap_builder_ret)
     {
-        std::cerr << "Failed to create swapchain";
+        std::cerr << "Failed to create swapchain" << std::endl;
     }
 
     vkb::destroy_swapchain(m_init_data.swapchain);
     m_init_data.swapchain = swap_builder_ret.value();
     m_render_data.swapchain_images = m_init_data.swapchain.get_images().value();
     m_render_data.swapchain_image_views = m_init_data.swapchain.get_image_views().value();
-    m_render_data.submit_semaphores.resize(m_render_data.swapchain_images.size());
     std::println("Swapchain created");
+}
+
+void Renderer::recreate_swapchain()
+{
+    vkDeviceWaitIdle(m_init_data.device);
+
+    m_init_data.swapchain.destroy_image_views(m_render_data.swapchain_image_views);
+    destroy_draw_image();
+    create_swapchain();
+    create_draw_image();
 }
 
 void Renderer::init_vma()
@@ -317,11 +341,12 @@ void Renderer::create_draw_image()
                             &m_render_data.draw_image.image,
                             &m_render_data.draw_image.allocation,
                             nullptr));
-    m_deletion_queue.push_function(
-        [this]()
-        {
-            vmaDestroyImage(m_init_data.allocator, m_render_data.draw_image.image, m_render_data.draw_image.allocation);
-        });
+    // m_deletion_queue.push_function(
+    //     [this]()
+    //     {
+    //         vmaDestroyImage(m_init_data.allocator, m_render_data.draw_image.image,
+    //         m_render_data.draw_image.allocation);
+    //     });
 
     VkImageViewCreateInfo image_view_info = {};
     image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -336,8 +361,8 @@ void Renderer::create_draw_image()
     image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     VK_CHECK(vkCreateImageView(m_init_data.device, &image_view_info, nullptr, &m_render_data.draw_image.image_view));
-    m_deletion_queue.push_function(
-        [this]() { vkDestroyImageView(m_init_data.device, m_render_data.draw_image.image_view, nullptr); });
+    // m_deletion_queue.push_function(
+    //     [this]() { vkDestroyImageView(m_init_data.device, m_render_data.draw_image.image_view, nullptr); });
 
     std::println("Draw image created\n\twidth: {}\n\theigth: {}",
                  m_render_data.draw_image.image_extent.width,
@@ -351,6 +376,13 @@ void Renderer::create_draw_image()
     descriptor_alloc_info.pSetLayouts = &m_render_data.descriptor_layout;
     VK_CHECK(vkAllocateDescriptorSets(m_init_data.device, &descriptor_alloc_info, &m_render_data.descriptor_set));
     update_draw_image_descriptor();
+}
+
+void Renderer::destroy_draw_image()
+{
+    vkDestroyImageView(m_init_data.device, m_render_data.draw_image.image_view, nullptr);
+    vmaDestroyImage(m_init_data.allocator, m_render_data.draw_image.image, m_render_data.draw_image.allocation);
+    vkResetDescriptorPool(m_init_data.device, m_render_data.descriptor_pool, 0);
 }
 
 void Renderer::update_draw_image_descriptor()
@@ -467,6 +499,7 @@ void Renderer::init_sync_structures()
             }
         });
 
+    m_render_data.submit_semaphores.resize(m_render_data.swapchain_images.size());
     for (size_t i = 0; i < m_render_data.swapchain_images.size(); i++)
     {
         VK_CHECK(vkCreateSemaphore(m_init_data.device, &semaphore_info, nullptr, &m_render_data.submit_semaphores[i]));
@@ -642,18 +675,23 @@ void Renderer::draw_frame()
     get_current_frame().flush_frame_data();
 
     uint32_t swapchain_image_index;
-    VK_CHECK(vkAcquireNextImageKHR(m_init_data.device,
-                                   m_init_data.swapchain,
-                                   1'000'000'000,
-                                   get_current_frame().acquire_semaphore,
-                                   nullptr,
-                                   &swapchain_image_index));
-    // VkResult result = vkAcquireNextImageKHR(m_vkb_device.device, m_vkb_swapchain.swapchain, 1'000'000'000,
-    // get_current_frame().acquire_semaphore, nullptr, &swapchain_image_index); if (result == VK_ERROR_OUT_OF_DATE_KHR)
-    // {
-    //     resize_requested = true;
-    //     return;
-    // }
+    // VK_CHECK(vkAcquireNextImageKHR(m_init_data.device,
+    //                                m_init_data.swapchain,
+    //                                1'000'000'000,
+    //                                get_current_frame().acquire_semaphore,
+    //                                nullptr,
+    //                                &swapchain_image_index));
+    VkResult result = vkAcquireNextImageKHR(m_init_data.device,
+                                            m_init_data.swapchain,
+                                            1'000'000'000,
+                                            get_current_frame().acquire_semaphore,
+                                            nullptr,
+                                            &swapchain_image_index);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        m_render_data.resize_requested = true;
+        return;
+    }
 
     VkCommandBuffer cmd_buffer = get_current_frame().command_buffer;
     VK_CHECK(vkResetCommandBuffer(cmd_buffer, 0));
@@ -730,11 +768,11 @@ void Renderer::draw_frame()
     present_info.waitSemaphoreCount = 1;
     present_info.pImageIndices = &swapchain_image_index;
 
-    VK_CHECK(vkQueuePresentKHR(m_init_data.device.get_queue(vkb::QueueType::graphics).value(), &present_info));
-    // result = vkQueuePresentKHR(m_graphics_queue, &present_info);
-    // if (result == VK_ERROR_OUT_OF_DATE_KHR)
-    // {
-    //     resize_requested = true;
-    // }
+    // VK_CHECK(vkQueuePresentKHR(m_init_data.device.get_queue(vkb::QueueType::graphics).value(), &present_info));
+    result = vkQueuePresentKHR(m_init_data.device.get_queue(vkb::QueueType::graphics).value(), &present_info);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    {
+        m_render_data.resize_requested = true;
+    }
     m_render_data.frame_index++;
 }

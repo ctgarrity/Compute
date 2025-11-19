@@ -112,6 +112,7 @@ class Renderer
         VkPipelineLayout compute_layout = VK_NULL_HANDLE;
         VkPipeline compute_pipeline = VK_NULL_HANDLE;
         PushConstantsData push_constants_data;
+        bool resize_requested = false;
     };
 
 public:
@@ -130,8 +131,10 @@ private:
     void create_physical_device();
     void create_device();
     void create_swapchain();
+    void recreate_swapchain();
     void init_vma();
     void create_draw_image();
+    void destroy_draw_image();
     void update_draw_image_descriptor();
     void create_command_buffers();
     void init_descriptors();
