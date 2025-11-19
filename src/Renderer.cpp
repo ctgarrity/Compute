@@ -45,6 +45,7 @@ void Renderer::destroy()
     VK_CHECK(vkDeviceWaitIdle(m_init_data.device));
     m_init_data.swapchain.destroy_image_views(m_render_data.swapchain_image_views);
     vkb::destroy_swapchain(m_init_data.swapchain);
+    destroy_draw_image();
     for (auto& frame : m_render_data.frame_data)
     {
         frame.flush_frame_data();
@@ -86,6 +87,7 @@ void Renderer::run()
             m_init_data.window_extent.width = width;
             m_init_data.window_extent.height = height;
             recreate_swapchain();
+            m_render_data.resize_requested = false;
         }
 
         ImGui_ImplVulkan_NewFrame();
