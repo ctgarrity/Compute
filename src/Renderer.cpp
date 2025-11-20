@@ -95,6 +95,10 @@ void Renderer::run()
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
+
+        bool show_demo = true;
+        ImGui::ShowDemoWindow(&show_demo);
+
         if (ImGui::Begin("Push Constants"))
         {
             ImGui::InputFloat("Time", (float*)&m_render_data.push_constants_data.time);
@@ -543,8 +547,8 @@ void Renderer::init_imgui()
         IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE; // (Optional) Set to create internal descriptor pool instead
                                                            // of using DescriptorPool
     init_info.PipelineInfoMain.Subpass = 0;
-    init_info.MinImageCount = 2;
-    init_info.ImageCount = 2;
+    init_info.MinImageCount = (uint32_t)m_render_data.swapchain_images.size();
+    init_info.ImageCount = (uint32_t)m_render_data.swapchain_images.size();
     init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.UseDynamicRendering = true;
     // init_info.Allocator = YOUR_ALLOCATOR; // optional

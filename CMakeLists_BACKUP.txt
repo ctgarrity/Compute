@@ -9,15 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
-# --- NEW: use pkg-config to find system SDL3 ---
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL3 REQUIRED sdl3)
-
 find_package(Vulkan REQUIRED)
-
-# REMOVED: vendored SDL, we’re using system SDL3 now
-# add_subdirectory(vendored/sdl EXCLUDE_FROM_ALL)
-
+add_subdirectory(vendored/sdl EXCLUDE_FROM_ALL)
 add_subdirectory(vendored/vk-bootstrap EXCLUDE_FROM_ALL)
 add_subdirectory(vendored/vma EXCLUDE_FROM_ALL)
 add_subdirectory(vendored/glm EXCLUDE_FROM_ALL)
@@ -45,31 +38,12 @@ set(SOURCES
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    GLM_ENABLE_EXPERIMENTAL
-    GLM_FORCE_RADIANS
-    GLM_FORCE_DEPTH_ZERO_TO_ONE
-)
-
-# --- CHANGED: add SDL3 include dirs from pkg-config ---
+target_compile_definitions(${PROJECT_NAME} PRIVATE GLM_ENABLE_EXPERIMENTAL GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE)
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/vendored/imgui
-        ${SDL3_INCLUDE_DIRS}
 )
 
-# Optional but nice: add any extra C flags from pkg-config (warnings/defines)
-target_compile_options(${PROJECT_NAME} PRIVATE
-    ${SDL3_CFLAGS_OTHER}
-)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${CMAKE_DL_LIBS} Vulkan::Vulkan SDL3::SDL3 vk-bootstrap::vk-bootstrap GPUOpen::VulkanMemoryAllocator glm::glm)
 
-# --- CHANGED: replace SDL3::SDL3 with system libs from pkg-config ---
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    ${CMAKE_DL_LIBS}
-    Vulkan::Vulkan
-    ${SDL3_LIBRARIES}
-    vk-bootstrap::vk-bootstrap
-    GPUOpen::VulkanMemoryAllocator
-    glm::glm
-)
