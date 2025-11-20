@@ -36,6 +36,7 @@ void Renderer::init()
     create_command_buffers();
     init_sync_structures();
     init_imgui();
+    init_push_constants();
     init_compute_pipeline();
     std::println("Renderer initialized");
 }
@@ -70,6 +71,7 @@ void Renderer::run()
                 done = true;
             if (event.window.type == SDL_EVENT_WINDOW_RESIZED)
             {
+                // Use pending resize flag and only set resize after mouse release
                 m_render_data.resize_requested = true;
             }
         }
@@ -269,6 +271,7 @@ void Renderer::create_swapchain()
     if (!swap_builder_ret)
     {
         std::cerr << "Failed to create swapchain" << std::endl;
+        return;
     }
 
     vkb::destroy_swapchain(m_init_data.swapchain);
@@ -713,7 +716,7 @@ void Renderer::draw_frame()
                             0,
                             nullptr);
 
-    m_render_data.push_constants_data.time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+    // m_render_data.push_constants_data.time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
     vkCmdPushConstants(cmd_buffer,
                        m_render_data.compute_layout,
                        VK_SHADER_STAGE_COMPUTE_BIT,

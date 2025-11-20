@@ -90,12 +90,12 @@ class Renderer
         }
     };
 
-    struct PushConstantsData
+    struct alignas(16) PushConstantsData
     {
         float time = 0.0f;
-        glm::vec3 color1 = {};
-        glm::vec3 color2 = {};
-        glm::vec2 cell_coords = {};
+        alignas(16) glm::vec3 color1 = {};
+        alignas(16) glm::vec3 color2 = {};
+        alignas(16) glm::vec2 cell_coords = {};
     };
 
     struct RenderData
