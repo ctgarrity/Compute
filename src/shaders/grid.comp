@@ -20,14 +20,14 @@ void main()
 
   if (texelCoord.x < size.x && texelCoord.y < size.y)
   {
-    vec3 col = vec3(1.0, 1.0, 1.0);
+    vec3 col = pc.color1;
     if (gl_LocalInvocationID.x == 0 || gl_LocalInvocationID.y == 0)
     {
-      col = vec3(0.0, 0.0, 0.0);
+      col = vec3(1.0, 1.0, 1.0);
     }
     if (gl_WorkGroupID.x == pc.cell_coords.x && gl_WorkGroupID.y == pc.cell_coords.y)
     {
-      col = vec3(0.0, 0.0, 0.0);
+      col = pc.color2;
     }
     imageStore(image, texelCoord, vec4(col, 1));
   }
