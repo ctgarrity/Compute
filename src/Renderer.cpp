@@ -7,6 +7,7 @@
 
 #include <vulkan/vulkan_core.h>
 
+#include "SDL3/SDL_events.h"
 #include "SDL3/SDL_init.h"
 #include "SDL3/SDL_timer.h"
 #include "SDL3/SDL_video.h"
@@ -17,10 +18,16 @@
 #include "Initializers.h"
 #include "Utilities.h"
 
+#include "glm/common.hpp"
 #include "glm/fwd.hpp"
 #include "imgui.h"
 #include "backends/imgui_impl_sdl3.h"
 #include "backends/imgui_impl_vulkan.h"
+
+Renderer::Renderer(const std::string& shader_path) : m_shader_path(shader_path)
+{
+    std::println("Renderer constructed!");
+}
 
 void Renderer::init()
 {
@@ -74,6 +81,10 @@ void Renderer::run()
                 // Use pending resize flag and only set resize after mouse release
                 m_render_data.resize_requested = true;
             }
+            if (event.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                SDL_GetMouseState(&m_render_data.mos_pos_x, &m_render_data.mos_pos_y);
+            }
         }
 
         if (SDL_GetWindowFlags(m_init_data.window) & SDL_WINDOW_MINIMIZED)
@@ -102,8 +113,8 @@ void Renderer::run()
         if (ImGui::Begin("Push Constants"))
         {
             ImGui::InputFloat("Time", (float*)&m_render_data.push_constants_data.time);
-            ImGui::InputFloat3("Color 1", (float*)&m_render_data.push_constants_data.color1);
-            ImGui::InputFloat3("Color 2", (float*)&m_render_data.push_constants_data.color2);
+            ImGui::ColorEdit3("Color 1", (float*)&m_render_data.push_constants_data.color1, ImGuiColorEditFlags_Float);
+            ImGui::ColorEdit3("Color 2", (float*)&m_render_data.push_constants_data.color2, ImGuiColorEditFlags_Float);
             ImGui::InputFloat2("Cell Coords", (float*)&m_render_data.push_constants_data.cell_coords);
         }
         ImGui::End();
@@ -635,7 +646,8 @@ void Renderer::init_compute_pipeline()
     VK_CHECK(vkCreatePipelineLayout(m_init_data.device, &layout_info, nullptr, &m_render_data.compute_layout));
 
     VkShaderModule gradient_shader_module = {};
-    if (!load_shader_module("shaders/gradient.spv", m_init_data.device, &gradient_shader_module))
+    // if (!load_shader_module("shaders/grid.spv", m_init_data.device, &gradient_shader_module))
+    if (!load_shader_module(m_shader_path.c_str(), m_init_data.device, &gradient_shader_module))
     {
         std::cerr << "Failed to load gradient shader" << std::endl;
         return;
@@ -720,7 +732,11 @@ void Renderer::draw_frame()
                             0,
                             nullptr);
 
-    // m_render_data.push_constants_data.time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+    m_render_data.push_constants_data.time = static_cast<float>(SDL_GetTicks()) / 1000.0f;
+    const uint32_t local_size_x = 16;
+    const uint32_t local_size_y = 16;
+    m_render_data.push_constants_data.cell_coords.x = glm::floor(m_render_data.mos_pos_x / local_size_x);
+    m_render_data.push_constants_data.cell_coords.y = glm::floor(m_render_data.mos_pos_y / local_size_y);
     vkCmdPushConstants(cmd_buffer,
                        m_render_data.compute_layout,
                        VK_SHADER_STAGE_COMPUTE_BIT,
@@ -728,8 +744,6 @@ void Renderer::draw_frame()
                        sizeof(PushConstantsData),
                        &m_render_data.push_constants_data);
 
-    const uint32_t local_size_x = 16;
-    const uint32_t local_size_y = 16;
     const uint32_t group_x = (m_render_data.draw_image.image_extent.width + local_size_x - 1) / local_size_x;
     const uint32_t group_y = (m_render_data.draw_image.image_extent.height + local_size_y - 1) / local_size_y;
     vkCmdDispatch(cmd_buffer, group_x, group_y, 1);

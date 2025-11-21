@@ -12,6 +12,7 @@
 #include <ranges>
 #include <vector>
 #include <array>
+#include <string>
 
 #define VK_CHECK(func)                                                                                                 \
     {                                                                                                                  \
@@ -92,7 +93,7 @@ class Renderer
 
     struct alignas(16) PushConstantsData
     {
-        float time = 0.0f;
+        alignas(16) float time = 0.0f;
         alignas(16) glm::vec3 color1 = {};
         alignas(16) glm::vec3 color2 = {};
         alignas(16) glm::vec2 cell_coords = {};
@@ -111,11 +112,13 @@ class Renderer
         VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
         VkPipelineLayout compute_layout = VK_NULL_HANDLE;
         VkPipeline compute_pipeline = VK_NULL_HANDLE;
+        float mos_pos_x = 0.0f, mos_pos_y = 0.0f;
         PushConstantsData push_constants_data;
         bool resize_requested = false;
     };
 
 public:
+    Renderer(const std::string& shader_path);
     void init();
     void destroy();
     void run();
@@ -124,6 +127,7 @@ private:
     InitData m_init_data;
     RenderData m_render_data;
     DeletionQueue m_deletion_queue;
+    std::string m_shader_path;
 
     void create_instance();
     void init_sdl();
